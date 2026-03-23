@@ -1,0 +1,5 @@
+services:
+  dshax:
+    build: .
+    volumes:
+      - ./vendor:/dshax/vendor

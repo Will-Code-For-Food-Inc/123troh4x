@@ -1,0 +1,5 @@
+services:
+  n64hax:
+    build: .
+    volumes:
+      - ./vendor:/n64hax/vendor

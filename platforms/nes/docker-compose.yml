@@ -1,0 +1,5 @@
+services:
+  neshax:
+    build: .
+    volumes:
+      - ./vendor:/neshax/vendor

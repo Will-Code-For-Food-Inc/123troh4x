@@ -1,0 +1,23 @@
+#! /bin/bash
+timestamp=$(date +%Y%m%d%H%M%S)
+
+if command -v podman &> /dev/null; then
+    CONTAINER_CMD="podman"
+    echo "Using Podman..."
+elif command -v docker &> /dev/null; then
+    CONTAINER_CMD="docker"
+    echo "Using Docker..."
+else
+    echo "Error: Neither Podman nor Docker is installed or available in PATH"
+    exit 1
+fi
+
+if [ "$1" = "--build" ]; then
+    echo "Building with $CONTAINER_CMD..."
+    $CONTAINER_CMD build . -t gbahax -t gbahax:$timestamp
+    echo "Build complete. Running gbahax:latest..."
+fi
+    $CONTAINER_CMD run -it \
+        --userns=keep-id:uid=1001,gid=1001 \
+        -v ./vendor:/gbahax/vendor \
+        gbahax:latest

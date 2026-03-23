@@ -1,0 +1,28 @@
+# Personal container config — keep out of the shared repo
+platforms/*/Dockerfile.local
+platforms/*/.claude/
+
+platforms/*/vendor/*/build/
+platforms/*/vendor/*/*.nds
+platforms/*/vendor/*/*.gba
+
+# ROM files
+*.nes
+*.sfc
+*.smc
+*.gb
+*.gbc
+*.gba
+*.nds
+*.gen
+*.z64
+*.n64
+*.v64
+*.iso
+*.cue
+*.img
+
+# Save files
+*.sav
+*.dsv
+*.srm

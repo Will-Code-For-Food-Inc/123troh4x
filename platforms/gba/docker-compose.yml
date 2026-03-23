@@ -1,0 +1,5 @@
+services:
+  gbahax:
+    build: .
+    volumes:
+      - ./vendor:/gbahax/vendor

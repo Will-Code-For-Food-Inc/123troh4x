@@ -1,0 +1,5 @@
+services:
+  sneshax:
+    build: .
+    volumes:
+      - ./vendor:/sneshax/vendor

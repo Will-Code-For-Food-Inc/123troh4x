@@ -1,0 +1,5 @@
+services:
+  gbchax:
+    build: .
+    volumes:
+      - ./vendor:/gbchax/vendor

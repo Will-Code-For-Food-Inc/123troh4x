@@ -1,0 +1,36 @@
+# Dockerfile.local.example
+#
+# Use this to bake personal tools and config into a derived platform image.
+# Good for: editors (neovim, emacs), custom shell setup, personal utilities.
+# Not needed for: dotfiles/config — use `make run-<platform>-configured` for that.
+#
+# Setup:
+#   1. Copy this file to platforms/<platform>/Dockerfile.local
+#   2. Change the FROM line to your platform's image name (see list below)
+#   3. Add your customizations
+#   4. make configure-<platform>    ← builds <platform>hax-local:latest
+#   5. make run-<platform>-local    ← launches your configured image
+#
+# Available base images:
+#   neshax    sneshax   gbchax    gbahax
+#   genhax    dshax     n64hax    ps1hax
+#
+# This file is gitignored — it won't be committed to the repo.
+
+FROM dshax:latest   # ← change to your platform
+
+# ── Example: install neovim ───────────────────────────────────────────────────
+# USER root
+# RUN apt install -y neovim
+# USER dshax                        # ← match the platform user name
+
+# ── Example: clone and run your dotfiles installer ───────────────────────────
+# USER dshax
+# RUN git clone https://github.com/you/dotfiles /home/dshax/.dotfiles \
+#     && cd /home/dshax/.dotfiles \
+#     && ./install.sh
+
+# ── Example: change the default shell ────────────────────────────────────────
+# USER root
+# RUN chsh -s /bin/bash dshax
+# USER dshax

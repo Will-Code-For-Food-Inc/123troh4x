@@ -1,0 +1,4 @@
+[submodule "platforms/ds/vendor/pokeplatinum"]
+	path = platforms/ds/vendor/pokeplatinum
+	url = git@github.com:b4ux1t3/pokeplatinum.git
+	branch = qol

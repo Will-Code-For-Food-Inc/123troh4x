@@ -1,0 +1,5 @@
+services:
+  ps1hax:
+    build: .
+    volumes:
+      - ./vendor:/ps1hax/vendor

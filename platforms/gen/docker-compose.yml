@@ -1,0 +1,5 @@
+services:
+  genhax:
+    build: .
+    volumes:
+      - ./vendor:/genhax/vendor

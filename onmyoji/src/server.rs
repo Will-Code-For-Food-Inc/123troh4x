@@ -6,7 +6,7 @@ use rmcp::{
 };
 use serde::Deserialize;
 
-use super::{podman, sessions::{Session, SessionStore}};
+use crate::{podman, sessions::{Session, SessionStore}};
 use protocol::{Op, Request, Response};
 
 // ── Parameter types ───────────────────────────────────────────────────────────

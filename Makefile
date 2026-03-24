@@ -19,7 +19,9 @@ CONTAINER_CMD := $(shell command -v podman 2>/dev/null || command -v docker 2>/d
         $(addprefix configure-,$(PLATFORMS)) \
         $(addprefix run-,$(PLATFORMS)) \
         $(addprefix run-,$(addsuffix -local,$(PLATFORMS))) \
-        $(addprefix run-,$(addsuffix -configured,$(PLATFORMS)))
+        $(addprefix run-,$(addsuffix -configured,$(PLATFORMS))) \
+        build-onmyoji build-gami \
+        test test-integration coverage coverage-integration bench
 
 $(addprefix build-,$(PLATFORMS)): build-base
 
@@ -100,3 +102,42 @@ run-%-configured:
 		-v ./platforms/$*/vendor:/$*hax/vendor \
 		-v $(DOTFILES):/home/$*hax/.dotfiles:ro \
 		$*hax:latest
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Rust workspace — onmyoji (MCP server) and gami (in-container runner)
+# ─────────────────────────────────────────────────────────────────────────────
+
+build-onmyoji:
+	cargo build --release -p onmyoji
+
+build-gami:
+	cargo build --release -p tsukumogami
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Testing
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#   make test                — unit + binary integration tests (no podman needed)
+#   make test-integration    — all tests including full container lifecycle
+#   make coverage            — HTML coverage report at coverage/index.html
+#   make coverage-integration — coverage including podman tests
+#   make bench               — criterion benchmarks
+
+test:
+	cargo test --workspace
+
+test-integration:
+	ROMHACK_INTEGRATION=1 cargo test --workspace
+
+coverage:
+	cargo llvm-cov --workspace --html --output-dir coverage/
+	@echo "Report: coverage/index.html"
+
+coverage-integration:
+	ROMHACK_INTEGRATION=1 cargo llvm-cov --workspace --html --output-dir coverage/
+	@echo "Report: coverage/index.html"
+
+bench:
+	cargo bench --workspace

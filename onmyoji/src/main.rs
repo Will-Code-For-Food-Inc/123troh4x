@@ -1,6 +1,4 @@
-mod podman;
-mod server;
-mod sessions;
+use onmyoji::server;
 
 use anyhow::{Context, Result};
 use rmcp::transport::io::stdio;

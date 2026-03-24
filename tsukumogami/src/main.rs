@@ -1,5 +1,4 @@
-mod dispatch;
-mod ops;
+use tsukumogami::dispatch;
 
 use std::io::{self, BufRead, Write};
 

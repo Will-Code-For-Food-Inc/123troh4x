@@ -2,8 +2,8 @@
   "mcpServers": {
     "romhack": {
       "type": "stdio",
-      "command": "/data/repos/romhack-playground/shim/target/release/shim",
-      "args": ["host"]
+      "command": "/data/repos/romhack-playground/onmyoji/target/release/onmyoji",
+      "args": []
     }
   }
 }

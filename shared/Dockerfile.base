@@ -1,7 +1,10 @@
 FROM rust:latest AS builder
 WORKDIR /build
-COPY shim/ ./
-RUN cargo build --release
+COPY tsukumogami/ ./tsukumogami/
+COPY protocol/ ./protocol/
+COPY Cargo.toml ./
+# Build only the tsukumogami (gami) binary for the container image
+RUN cargo build --release -p tsukumogami
 
 FROM ubuntu:latest
 
@@ -28,4 +31,4 @@ RUN apt install -y \
     xz-utils \
     zsh
 
-COPY --from=builder /build/target/release/shim /usr/local/bin/shim
+COPY --from=builder /build/target/release/gami /usr/local/bin/gami

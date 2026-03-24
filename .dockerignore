@@ -1,0 +1,4 @@
+shim/target/
+platforms/*/vendor/
+.git/
+.claude/

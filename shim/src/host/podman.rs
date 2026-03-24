@@ -148,8 +148,8 @@ fn repo_root() -> String {
     std::env::current_exe()
         .ok()
         .and_then(|p| {
-            // …/shim/target/<profile>/shim → go up 3 levels
-            p.ancestors().nth(3).map(|a| a.to_string_lossy().into_owned())
+            // …/shim/target/<profile>/shim → go up 4 levels to repo root
+            p.ancestors().nth(4).map(|a| a.to_string_lossy().into_owned())
         })
         .unwrap_or_else(|| ".".to_owned())
 }

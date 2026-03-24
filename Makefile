@@ -26,7 +26,7 @@ $(addprefix build-,$(PLATFORMS)): build-base
 build-all: $(addprefix build-,$(PLATFORMS))
 
 build-base:
-	$(CONTAINER_CMD) build -t romhack-base -f ./shared/Dockerfile.base ./shared/
+	$(CONTAINER_CMD) build -t romhack-base -f ./shared/Dockerfile.base .
 
 build-%:
 	$(CONTAINER_CMD) build -t $*hax ./platforms/$*/

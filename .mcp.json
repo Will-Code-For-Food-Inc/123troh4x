@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "romhack": {
+      "type": "stdio",
+      "command": "/data/repos/romhack-playground/shim/target/release/shim",
+      "args": ["host"]
+    }
+  }
+}

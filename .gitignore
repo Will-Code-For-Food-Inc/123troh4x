@@ -37,6 +37,11 @@ platforms/*/vendor/*/*.gba
 
 # Rust build artifacts
 shim/target/
+target/
 
 # Pre-built binaries (built inside Docker, not tracked)
 shared/shim
+shared/gami
+
+# Machine-specific onmyoji config (path to repo root varies per machine)
+onmyoji.toml

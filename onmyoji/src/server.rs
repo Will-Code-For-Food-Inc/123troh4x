@@ -48,14 +48,16 @@ struct DebugPortParams {
 
 #[derive(Clone)]
 pub struct OnmyojiServer {
+    root: String,
     sessions: SessionStore,
     tool_router: ToolRouter<Self>,
 }
 
 #[tool_router]
 impl OnmyojiServer {
-    pub fn new() -> Self {
+    pub fn new(root: String) -> Self {
         Self {
+            root,
             sessions: SessionStore::default(),
             tool_router: Self::tool_router(),
         }
@@ -73,7 +75,7 @@ impl OnmyojiServer {
         match podman::get_platform(&platform) {
             None => format!("Unknown platform: {platform}. Valid: nes, snes, gbc, gba, gen, ds, n64, ps1"),
             Some(info) => {
-                let root = std::path::PathBuf::from(podman::repo_root());
+                let root = std::path::PathBuf::from(&self.root);
                 let dockerfile = std::fs::read_to_string(
                     root.join("platforms").join(info.name).join("Dockerfile"),
                 )
@@ -92,7 +94,7 @@ impl OnmyojiServer {
     fn build_platform(&self, Parameters(PlatformParam { platform }): Parameters<PlatformParam>) -> String {
         match podman::get_platform(&platform) {
             None => format!("Unknown platform: {platform}"),
-            Some(info) => match podman::build_platform(&info) {
+            Some(info) => match podman::build_platform(&self.root, &info) {
                 Ok(msg) => msg,
                 Err(e) => e,
             },
@@ -106,7 +108,7 @@ impl OnmyojiServer {
     fn start_session(&self, Parameters(PlatformParam { platform }): Parameters<PlatformParam>) -> String {
         match podman::get_platform(&platform) {
             None => format!("Unknown platform: {platform}"),
-            Some(info) => match podman::start_container(&info) {
+            Some(info) => match podman::start_container(&self.root, &info) {
                 Err(e) => format!("Failed to start session: {e}"),
                 Ok(container_id) => {
                     let session_id = uuid::Uuid::new_v4().to_string();
@@ -185,7 +187,7 @@ impl OnmyojiServer {
         match podman::get_platform(&platform) {
             None => format!("Unknown platform: {platform}"),
             Some(info) => {
-                let mount = podman::vendor_mount(info.name, info.workdir);
+                let mount = podman::vendor_mount(&self.root, info.name, info.workdir);
                 let out = std::process::Command::new("podman")
                     .args([
                         "run", "-d", "--rm",

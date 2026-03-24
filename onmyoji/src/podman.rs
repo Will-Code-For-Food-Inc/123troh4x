@@ -48,13 +48,12 @@ pub fn image_exists(image: &str) -> bool {
 }
 
 /// Vendor mount: host platforms/<name>/vendor → <workdir>/vendor
-pub fn vendor_mount(platform: &str, workdir: &str) -> String {
-    let root = repo_root();
+pub fn vendor_mount(root: &str, platform: &str, workdir: &str) -> String {
     format!("{root}/platforms/{platform}/vendor:{workdir}/vendor")
 }
 
-pub fn start_container(platform: &PlatformInfo) -> Result<String, String> {
-    let mount = vendor_mount(platform.name, platform.workdir);
+pub fn start_container(root: &str, platform: &PlatformInfo) -> Result<String, String> {
+    let mount = vendor_mount(root, platform.name, platform.workdir);
     let out = Command::new("podman")
         .args([
             "run", "-d", "--rm",
@@ -107,9 +106,7 @@ pub fn exec_op(container_id: &str, request: &Request) -> Result<Response, String
 }
 
 /// Build a platform image (and romhack-base first if needed).
-pub fn build_platform(platform: &PlatformInfo) -> Result<String, String> {
-    let root = repo_root();
-
+pub fn build_platform(root: &str, platform: &PlatformInfo) -> Result<String, String> {
     if !image_exists("romhack-base") {
         let out = Command::new("podman")
             .args([
@@ -138,15 +135,6 @@ pub fn build_platform(platform: &PlatformInfo) -> Result<String, String> {
     } else {
         Err(format!("Build failed:\n{}", String::from_utf8_lossy(&out.stderr)))
     }
-}
-
-/// Walk up from the onmyoji binary to the repo root.
-/// Binary lives at <repo>/onmyoji/target/<profile>/onmyoji — 4 ancestors up.
-pub fn repo_root() -> String {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.ancestors().nth(4).map(|a| a.to_string_lossy().into_owned()))
-        .unwrap_or_else(|| ".".to_owned())
 }
 
 // ── Helper trait ───────────────────────────────────────────────────────────────
@@ -192,9 +180,7 @@ mod tests {
 
     #[test]
     fn vendor_mount_format() {
-        // We can't easily test the full path without a real binary, but we can
-        // verify the structure of the format string.
-        let mount = vendor_mount("ds", "/dshax");
+        let mount = vendor_mount("/repos/romhack", "ds", "/dshax");
         assert!(mount.contains("/platforms/ds/vendor"), "wrong platform path in: {mount}");
         assert!(mount.contains(":/dshax/vendor"), "wrong container path in: {mount}");
         assert!(!mount.contains("//"), "double slash in: {mount}");
@@ -222,12 +208,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn repo_root_is_a_directory() {
-        let root = repo_root();
-        // In test context the binary is somewhere under the workspace, so
-        // repo_root may not resolve correctly — but it should at least not panic
-        // and should return a non-empty string.
-        assert!(!root.is_empty());
-    }
 }

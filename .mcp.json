@@ -3,7 +3,9 @@
     "romhack": {
       "type": "stdio",
       "command": "/data/repos/romhack-playground/onmyoji/target/release/onmyoji",
-      "args": []
+      "env": {
+        "ROMHACK_ROOT": "/data/repos/romhack-playground"
+      }
     }
   }
 }

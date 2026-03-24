@@ -2,7 +2,7 @@ mod podman;
 mod server;
 mod sessions;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use rmcp::transport::io::stdio;
 use rmcp::ServiceExt;
 use server::OnmyojiServer;
@@ -14,7 +14,10 @@ async fn main() -> Result<()> {
         .with_ansi(false)
         .init();
 
-    let server = OnmyojiServer::new();
+    let root = std::env::var("ROMHACK_ROOT")
+        .context("ROMHACK_ROOT is not set. Set it to the absolute path of the romhack-playground repo.")?;
+
+    let server = OnmyojiServer::new(root);
     let service = server.serve(stdio()).await?;
     service.waiting().await?;
     Ok(())

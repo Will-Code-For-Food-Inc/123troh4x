@@ -1,3 +1,8 @@
+FROM rust:latest AS builder
+WORKDIR /build
+COPY shim/ ./
+RUN cargo build --release
+
 FROM ubuntu:latest
 
 RUN apt update && apt upgrade -y
@@ -22,3 +27,5 @@ RUN apt install -y \
     xxd \
     xz-utils \
     zsh
+
+COPY --from=builder /build/target/release/shim /usr/local/bin/shim

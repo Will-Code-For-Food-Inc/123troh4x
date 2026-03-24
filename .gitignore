@@ -34,3 +34,9 @@ platforms/*/vendor/*/*.gba
 *.sav
 *.dsv
 *.srm
+
+# Rust build artifacts
+shim/target/
+
+# Pre-built binaries (built inside Docker, not tracked)
+shared/shim

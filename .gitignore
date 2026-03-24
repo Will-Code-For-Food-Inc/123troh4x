@@ -2,6 +2,14 @@
 platforms/*/Dockerfile.local
 platforms/*/.claude/
 
+# AI agent local overrides — user-specific, never committed
+CLAUDE.local.md
+AGENTS.local.md
+.github/copilot-instructions.local.md
+
+# Claude Code personal settings — project settings.json is committed
+.claude/settings.local.json
+
 platforms/*/vendor/*/build/
 platforms/*/vendor/*/*.nds
 platforms/*/vendor/*/*.gba

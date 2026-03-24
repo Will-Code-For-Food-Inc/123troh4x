@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(podman build:*)",
+      "Bash(podman run:*)"
+    ]
+  }
+}

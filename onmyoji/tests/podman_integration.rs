@@ -419,6 +419,197 @@ fn open_debug_port_starts_container() {
     let _ = podman::stop_container(&container_id);
 }
 
+// ── GBA end-to-end pipeline ───────────────────────────────────────────────────
+
+fn gba_rom_path() -> Option<String> {
+    // Allow override via env; fall back to local Downloads copy.
+    std::env::var("ROMHACK_GBA_ROM").ok().or_else(|| {
+        let p = "/home/alex/Downloads/Pinball Tycoon/Pinball Tycoon (U).gba";
+        if std::path::Path::new(p).exists() { Some(p.into()) } else { None }
+    })
+}
+
+fn with_gba_session<F: FnOnce(&str)>(f: F) {
+    let root = root();
+    let info = podman::get_platform("gba").expect("gba platform not found");
+    let container_id = podman::start_container(&root, &info).expect("start gba container");
+    let _guard = ContainerGuard(container_id.clone());
+    f(&container_id);
+}
+
+#[test]
+fn gba_image_is_built() {
+    if skip_unless_integration() { return; }
+    let output = podman::list_platforms();
+    let gba_line = output.lines().find(|l| l.contains(" gba ") || l.ends_with("gba")).unwrap_or("");
+    assert!(gba_line.contains('✓'), "gbahax not built — run `make build-gba` first\n{output}");
+}
+
+#[test]
+fn gba_session_start_stop() {
+    if skip_unless_integration() { return; }
+    with_gba_session(|ctr| {
+        let resp = send(ctr, Op::Check { tool: "arm-none-eabi-gcc".into() });
+        assert!(resp.ok, "arm-none-eabi-gcc missing from gbahax: {:?}", resp.stderr);
+    });
+}
+
+#[test]
+fn gba_rom_hash_and_register() {
+    if skip_unless_integration() { return; }
+    let rom = match gba_rom_path() {
+        Some(p) => p,
+        None => { eprintln!("skipped gba_rom_hash_and_register: no GBA ROM found"); return; }
+    };
+
+    let hash = knowledge::hash_rom_file(&rom).expect("hash_rom_file failed");
+    assert_eq!(hash.len(), 8, "CRC32 hash should be 8 hex chars");
+    eprintln!("Pinball Tycoon (U) CRC32: {hash}");
+
+    let kb = Knowledge::open_in_memory().expect("open kb");
+    let rom_id = kb.register_rom(&RomInfo {
+        hash: hash.clone(),
+        title: Some("Pinball Tycoon (U)".into()),
+        platform: "gba".into(),
+        region: Some("US".into()),
+    }).expect("register_rom");
+    assert!(rom_id > 0);
+
+    // Idempotent second registration returns the same id.
+    let rom_id2 = kb.register_rom(&RomInfo {
+        hash,
+        title: Some("Pinball Tycoon (U)".into()),
+        platform: "gba".into(),
+        region: Some("US".into()),
+    }).expect("register_rom second");
+    assert_eq!(rom_id, rom_id2);
+}
+
+#[test]
+fn gba_rom_copy_and_read_header() {
+    if skip_unless_integration() { return; }
+    let rom = match gba_rom_path() {
+        Some(p) => p,
+        None => { eprintln!("skipped gba_rom_copy_and_read_header: no GBA ROM found"); return; }
+    };
+
+    with_gba_session(|ctr| {
+        // Copy ROM into the container.
+        podman::copy_to_container(ctr, &rom, "/tmp/pinball.gba")
+            .expect("copy ROM into container");
+
+        // GBA ROM header byte 0-3: entry point branch (2e 00 00 ea on most ROMs).
+        let resp = send(ctr, Op::ReadBytes {
+            file: "/tmp/pinball.gba".into(),
+            offset: 0,
+            length: 4,
+        });
+        assert!(resp.ok, "ReadBytes failed: {:?}", resp.error);
+        let header = resp.stdout.unwrap();
+        let header = header.trim();
+        eprintln!("GBA entry-point bytes: {header}");
+        // Must be 8 hex chars (4 bytes).
+        assert_eq!(header.len(), 8, "expected 4-byte hex, got: {header}");
+
+        // Game title is ASCII at offset 0xA0, length 12.
+        let title_resp = send(ctr, Op::ReadBytes {
+            file: "/tmp/pinball.gba".into(),
+            offset: 0xA0,
+            length: 12,
+        });
+        assert!(title_resp.ok, "ReadBytes title failed: {:?}", title_resp.error);
+        eprintln!("GBA title hex: {}", title_resp.stdout.unwrap_or_default().trim());
+    });
+}
+
+#[test]
+fn gba_rom_write_and_patch_roundtrip() {
+    if skip_unless_integration() { return; }
+    let rom = match gba_rom_path() {
+        Some(p) => p,
+        None => { eprintln!("skipped gba_rom_write_and_patch_roundtrip: no GBA ROM found"); return; }
+    };
+
+    with_gba_session(|ctr| {
+        podman::copy_to_container(ctr, &rom, "/tmp/original.gba")
+            .expect("copy original ROM");
+
+        // Make a copy to modify.
+        let cp = std::process::Command::new("podman")
+            .args(["exec", ctr, "cp", "/tmp/original.gba", "/tmp/modified.gba"])
+            .output().expect("podman exec cp");
+        assert!(cp.status.success());
+
+        // Read 4 bytes at offset 0xA0 (game title area) before modification.
+        let before = send(ctr, Op::ReadBytes {
+            file: "/tmp/modified.gba".into(),
+            offset: 0xA0,
+            length: 4,
+        });
+        assert!(before.ok);
+        let original_bytes = before.stdout.unwrap();
+        let original_bytes = original_bytes.trim();
+        eprintln!("title[0..4] before patch: {original_bytes}");
+
+        // Overwrite those 4 bytes with a known sentinel (deadbeef).
+        let write = send(ctr, Op::WriteBytes {
+            file: "/tmp/modified.gba".into(),
+            offset: 0xA0,
+            bytes: "deadbeef".into(),
+        });
+        assert!(write.ok, "WriteBytes failed: {:?}", write.error);
+
+        // Verify the sentinel is there.
+        let after = send(ctr, Op::ReadBytes {
+            file: "/tmp/modified.gba".into(),
+            offset: 0xA0,
+            length: 4,
+        });
+        assert_eq!(after.stdout.unwrap().trim(), "deadbeef");
+
+        // Generate IPS patch.
+        let gen = send(ctr, Op::GeneratePatch {
+            original: "/tmp/original.gba".into(),
+            modified: "/tmp/modified.gba".into(),
+            output: "/tmp/pinball_test.ips".into(),
+            format: PatchFormat::Ips,
+        });
+        assert!(gen.ok, "GeneratePatch failed: {:?}", gen.error.or(gen.stderr));
+
+        // Apply the patch to a fresh copy of the original.
+        let cp2 = std::process::Command::new("podman")
+            .args(["exec", ctr, "cp", "/tmp/original.gba", "/tmp/patched.gba"])
+            .output().expect("podman exec cp");
+        assert!(cp2.status.success());
+
+        let apply = send(ctr, Op::ApplyPatch {
+            rom: "/tmp/patched.gba".into(),
+            patch: "/tmp/pinball_test.ips".into(),
+            output: "/tmp/patched_out.gba".into(),
+            format: PatchFormat::Ips,
+        });
+        assert!(apply.ok, "ApplyPatch failed: {:?}", apply.error.or(apply.stderr));
+
+        // The patched ROM should have the sentinel at 0xA0.
+        let verify = send(ctr, Op::ReadBytes {
+            file: "/tmp/patched_out.gba".into(),
+            offset: 0xA0,
+            length: 4,
+        });
+        assert!(verify.ok, "ReadBytes on patched output failed: {:?}", verify.error);
+        assert_eq!(verify.stdout.unwrap().trim(), "deadbeef", "patch not applied correctly");
+
+        // Copy the patch back to host for inspection.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let host_patch = dir.path().join("pinball_test.ips");
+        podman::copy_from_container(ctr, "/tmp/pinball_test.ips", host_patch.to_str().unwrap())
+            .expect("copy patch back to host");
+        let patch_size = std::fs::metadata(&host_patch).expect("patch stat").len();
+        eprintln!("IPS patch size: {patch_size} bytes");
+        assert!(patch_size > 0, "patch file is empty");
+    });
+}
+
 // ── File copy (podman cp) ─────────────────────────────────────────────────────
 
 #[test]

@@ -49,8 +49,9 @@ coverage/
 # Qdrant persistent storage
 qdrant_storage/
 
-# Knowledge database (populated at runtime from decomp builds)
+# Knowledge database (populated at runtime from decomp builds and hacking sessions)
 knowledge/knowledge.db
+.knowledge.db
 
 # Local dev container — closed source, personal auth mounts
 Containerfile.remote

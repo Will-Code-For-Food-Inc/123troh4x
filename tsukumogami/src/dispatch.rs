@@ -61,9 +61,31 @@ mod tests {
     }
 
     #[test]
-    fn list_ops_echoes_id() {
-        let resp = dispatch(make_req(Op::ListOps));
+    fn git_diff_no_file() {
+        // GitDiff without a file runs `git diff` — just check dispatch doesn't panic
+        // and returns a response with the correct id.
+        let resp = dispatch(make_req(Op::GitDiff { file: None }));
         assert_eq!(resp.id, "test-id");
+    }
+
+    #[test]
+    fn git_diff_with_file() {
+        let resp = dispatch(make_req(Op::GitDiff { file: Some("src/main.rs".into()) }));
+        assert_eq!(resp.id, "test-id");
+    }
+
+    #[test]
+    fn workdir_is_forwarded() {
+        // Run `true` (always exits 0) with an explicit workdir — verifies workdir
+        // is threaded through dispatch to run_op without being dropped.
+        let req = Request {
+            id: "wd-test".into(),
+            workdir: Some("/tmp".into()),
+            op: Op::Check { tool: "true".into() },
+        };
+        let resp = dispatch(req);
+        assert!(resp.ok);
+        assert_eq!(resp.id, "wd-test");
     }
 
     #[test]

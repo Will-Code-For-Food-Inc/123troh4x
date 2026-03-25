@@ -126,18 +126,22 @@ fn git_status_outside_repo() {
 fn build_in_dir_without_makefile() {
     let resp = send_one(Op::Build { target: None, jobs: None }, Some("/tmp"));
     assert!(!resp.ok);
+    let stderr = resp.stderr.unwrap_or_default();
+    assert!(!stderr.is_empty(), "make should emit an error to stderr when no Makefile found");
 }
 
 // ── HexDump ───────────────────────────────────────────────────────────────────
 
 #[test]
 fn hexdump_binary_file() {
-    // Use the gami binary itself as the file to hexdump
+    // Use the gami binary itself — first 16 bytes, xxd output starts with offset + hex columns
     let file = gami_bin().to_string_lossy().into_owned();
     let resp = send_one(Op::HexDump { file, offset: Some(0), length: Some(16) }, None);
     assert!(resp.ok);
     let stdout = resp.stdout.unwrap();
-    assert!(!stdout.is_empty(), "xxd should produce output");
+    // xxd output format: "00000000: 7f45 4c46 ..."  — address, colon, hex pairs
+    assert!(stdout.contains(':'), "xxd output should contain address:hex columns");
+    assert!(stdout.contains("00000000"), "first line should start at offset 0");
 }
 
 // ── Grep ──────────────────────────────────────────────────────────────────────

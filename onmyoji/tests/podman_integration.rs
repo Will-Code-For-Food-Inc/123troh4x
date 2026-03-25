@@ -130,8 +130,9 @@ fn run_op_git_status_in_vendor() {
     if skip_unless_integration() { return; }
     with_session(|ctr| {
         let resp = send_in(ctr, Op::GitStatus, "/dshax/vendor");
-        // vendor dir exists but may or may not be a git repo — we just want no crash
-        assert!(resp.exit_code == 0 || resp.exit_code != 0, "should not panic");
+        // vendor/pokeplatinum is a git repo — git status should succeed
+        assert!(resp.ok, "git status in vendor failed: {:?}", resp.stderr);
+        assert_eq!(resp.exit_code, 0);
     });
 }
 

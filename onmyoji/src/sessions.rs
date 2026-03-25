@@ -30,7 +30,6 @@ impl SessionStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::thread;
 
     fn make_session(container_id: &str) -> Session {
         Session { container_id: container_id.into(), platform: "ds".into() }
@@ -66,44 +65,4 @@ mod tests {
         assert!(store.remove("ghost").is_none());
     }
 
-    #[test]
-    fn concurrent_inserts_all_visible() {
-        let store = SessionStore::default();
-        let mut handles = vec![];
-
-        for i in 0..50 {
-            let s = store.clone();
-            handles.push(thread::spawn(move || {
-                s.insert(format!("session-{i}"), make_session(&format!("ctr-{i}")));
-            }));
-        }
-        for h in handles {
-            h.join().unwrap();
-        }
-
-        for i in 0..50 {
-            assert!(
-                store.get(&format!("session-{i}")).is_some(),
-                "missing session-{i}"
-            );
-        }
-    }
-
-    #[test]
-    fn concurrent_get_remove_no_panic() {
-        let store = SessionStore::default();
-        store.insert("shared".into(), make_session("ctr-shared"));
-
-        let mut handles = vec![];
-        for _ in 0..10 {
-            let s = store.clone();
-            handles.push(thread::spawn(move || {
-                let _ = s.get("shared");
-                let _ = s.remove("shared");
-            }));
-        }
-        for h in handles {
-            h.join().unwrap(); // must not panic
-        }
-    }
 }

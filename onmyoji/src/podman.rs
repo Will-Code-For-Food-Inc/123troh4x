@@ -161,8 +161,21 @@ mod tests {
 
     #[test]
     fn all_eight_platforms_resolve() {
-        for name in &["nes", "snes", "gbc", "gba", "gen", "ds", "n64", "ps1"] {
-            assert!(get_platform(name).is_some(), "missing platform: {name}");
+        let cases = [
+            ("nes",  "neshax",  "/neshax"),
+            ("snes", "sneshax", "/sneshax"),
+            ("gbc",  "gbchax",  "/gbchax"),
+            ("gba",  "gbahax",  "/gbahax"),
+            ("gen",  "genhax",  "/genhax"),
+            ("ds",   "dshax",   "/dshax"),
+            ("n64",  "n64hax",  "/n64hax"),
+            ("ps1",  "ps1hax",  "/ps1hax"),
+        ];
+        for (name, image, workdir) in &cases {
+            let p = get_platform(name).unwrap_or_else(|| panic!("missing platform: {name}"));
+            assert_eq!(p.name, *name);
+            assert_eq!(p.image, *image);
+            assert_eq!(p.workdir, *workdir);
         }
     }
 
@@ -181,9 +194,7 @@ mod tests {
     #[test]
     fn vendor_mount_format() {
         let mount = vendor_mount("/repos/romhack", "ds", "/dshax");
-        assert!(mount.contains("/platforms/ds/vendor"), "wrong platform path in: {mount}");
-        assert!(mount.contains(":/dshax/vendor"), "wrong container path in: {mount}");
-        assert!(!mount.contains("//"), "double slash in: {mount}");
+        assert_eq!(mount, "/repos/romhack/platforms/ds/vendor:/dshax/vendor");
     }
 
     #[test]

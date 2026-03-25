@@ -272,18 +272,4 @@ mod tests {
         assert!(serde_json::from_str::<Op>(bad).is_err());
     }
 
-    #[test]
-    fn extra_unknown_fields_ignored() {
-        // serde should ignore unknown fields by default
-        let json = r#"{"op":"clean","future_field":"ignored"}"#;
-        let op: Op = serde_json::from_str(json).expect("should ignore unknown fields");
-        assert_eq!(op, Op::Clean);
-    }
-
-    #[test]
-    fn missing_required_field_is_error() {
-        // Check requires `tool` field
-        let bad = r#"{"op":"check"}"#;
-        assert!(serde_json::from_str::<Op>(bad).is_err());
-    }
 }

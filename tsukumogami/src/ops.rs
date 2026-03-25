@@ -206,18 +206,7 @@ mod tests {
     #[test]
     fn grep_non_recursive() {
         let args = grep_cmd("TODO", None, false);
-        assert!(!args.contains(&"-r".to_string()));
+        assert!(args.contains(&"--max-depth=1".to_string()));
         assert!(args.contains(&"TODO".to_string()));
-    }
-
-    #[test]
-    fn list_ops_contains_all() {
-        let ops = list_ops();
-        for expected in &[
-            "build", "clean", "check", "disassemble", "hex_dump",
-            "grep", "git_status", "git_diff", "list_ops",
-        ] {
-            assert!(ops.contains(expected), "missing op: {expected}");
-        }
     }
 }

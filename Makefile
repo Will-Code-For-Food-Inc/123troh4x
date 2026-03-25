@@ -131,12 +131,13 @@ test:
 test-integration:
 	ROMHACK_INTEGRATION=1 cargo test --workspace
 
-coverage:
-	cargo llvm-cov --workspace --html --output-dir coverage/
+coverage: build-gami
+	cargo llvm-cov --workspace --lib --tests --html --output-dir coverage/
 	@echo "Report: coverage/index.html"
 
-coverage-integration:
-	ROMHACK_INTEGRATION=1 cargo llvm-cov --workspace --html --output-dir coverage/
+coverage-integration: build-gami
+	ROMHACK_INTEGRATION=1 ROMHACK_ROOT=$(PWD) \
+	  cargo llvm-cov --workspace --lib --tests --html --output-dir coverage/
 	@echo "Report: coverage/index.html"
 
 bench:

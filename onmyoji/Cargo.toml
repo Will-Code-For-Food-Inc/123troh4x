@@ -1,0 +1,36 @@
+[package]
+name = "onmyoji"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "onmyoji"
+path = "src/lib.rs"
+
+[[bin]]
+name = "onmyoji"
+path = "src/main.rs"
+
+[dependencies]
+protocol  = { path = "../protocol" }
+knowledge = { path = "../knowledge" }
+rmcp = { version = "1.2.0", features = ["server", "macros", "transport-io", "schemars"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = "1"
+anyhow = "1"
+uuid = { version = "1", features = ["v4"] }
+dashmap = "6"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+qdrant-client = "1"
+fastembed = "4"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+tempfile = "3"
+
+[[bench]]
+name = "sessions"
+harness = false

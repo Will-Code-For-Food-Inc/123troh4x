@@ -1,8 +1,23 @@
+FROM rust:latest AS builder
+WORKDIR /build
+COPY tsukumogami/ ./tsukumogami/
+COPY protocol/ ./protocol/
+COPY Cargo.toml ./
+# Cargo requires all workspace members to exist to resolve the manifest.
+# Copy onmyoji/Cargo.toml and stub out src/ — we only build tsukumogami here.
+COPY onmyoji/Cargo.toml  ./onmyoji/Cargo.toml
+COPY knowledge/Cargo.toml ./knowledge/Cargo.toml
+RUN mkdir -p onmyoji/src onmyoji/benches knowledge/src && \
+    echo 'fn main(){}' > onmyoji/src/main.rs && \
+    echo 'fn main(){}' > onmyoji/benches/sessions.rs && \
+    echo '' > knowledge/src/lib.rs
+# Build only the tsukumogami (gami) binary for the container image
+RUN cargo build --release -p tsukumogami
+
 FROM ubuntu:latest
 
-RUN apt update && apt upgrade -y
-
-RUN apt install -y \
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --fix-missing \
+    binutils-arm-none-eabi \
     bison \
     cmake \
     curl \
@@ -21,4 +36,14 @@ RUN apt install -y \
     wget \
     xxd \
     xz-utils \
-    zsh
+    zsh \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Build flips (IPS/BPS patcher) from source — not in apt
+RUN git clone --depth 1 https://github.com/Alcaro/Flips.git /tmp/flips \
+    && cd /tmp/flips \
+    && TARGET=cli make flips \
+    && install -m 755 flips /usr/local/bin/flips \
+    && rm -rf /tmp/flips
+
+COPY --from=builder /build/target/release/gami /usr/local/bin/gami

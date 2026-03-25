@@ -7,26 +7,27 @@ CONTAINER_CMD := $(shell command -v podman 2>/dev/null || command -v docker 2>/d
 # ─────────────────────────────────────────────────────────────────────────────
 # Build the shared base image first, then any platform image on top of it.
 #
-#   make build-base        — build shared/Dockerfile.base → romhack-base
-#   make build-<platform>  — build a single platform image
-#   make build-all         — build base, then all platform images
+#   make build-base        — build shared/Dockerfile.base → romhack-base:latest
+#   make build-<platform>  — build a single platform image from existing base
+#   make build-all         — build base, then all platform images in sequence
 #
-# Platform builds depend on build-base, so make handles the order automatically.
-# Run `make -j build-all` to build all platform images in parallel after the base.
+# Platform builds use whatever romhack-base:latest is currently tagged.
+# Run `make build-base` explicitly first whenever gami source or the base
+# Dockerfile changes, then rebuild the affected platform images.
 
 .PHONY: build-all build-base \
         $(addprefix build-,$(PLATFORMS)) \
         $(addprefix configure-,$(PLATFORMS)) \
         $(addprefix run-,$(PLATFORMS)) \
         $(addprefix run-,$(addsuffix -local,$(PLATFORMS))) \
-        $(addprefix run-,$(addsuffix -configured,$(PLATFORMS)))
+        $(addprefix run-,$(addsuffix -configured,$(PLATFORMS))) \
+        build-onmyoji build-gami \
+        test test-integration coverage coverage-integration bench
 
-$(addprefix build-,$(PLATFORMS)): build-base
-
-build-all: $(addprefix build-,$(PLATFORMS))
+build-all: build-base $(addprefix build-,$(PLATFORMS))
 
 build-base:
-	$(CONTAINER_CMD) build -t romhack-base -f ./shared/Dockerfile.base ./shared/
+	$(CONTAINER_CMD) build -t romhack-base -f ./shared/Dockerfile.base .
 
 build-%:
 	$(CONTAINER_CMD) build -t $*hax ./platforms/$*/
@@ -100,3 +101,67 @@ run-%-configured:
 		-v ./platforms/$*/vendor:/$*hax/vendor \
 		-v $(DOTFILES):/home/$*hax/.dotfiles:ro \
 		$*hax:latest
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Rust workspace — onmyoji (MCP server) and gami (in-container runner)
+# ─────────────────────────────────────────────────────────────────────────────
+
+build-onmyoji:
+	cargo build --release -p onmyoji
+
+build-gami:
+	cargo build --release -p tsukumogami
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Qdrant vector store
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#   make run-qdrant    — start Qdrant in the background (data in ./qdrant_storage)
+#   make stop-qdrant   — stop and remove the container
+#
+# REST API:  http://localhost:6333
+# gRPC:      localhost:6334  (used by the Rust qdrant-client)
+# Dashboard: http://localhost:6333/dashboard
+
+QDRANT_STORAGE ?= $(CURDIR)/qdrant_storage
+
+run-qdrant:
+	$(CONTAINER_CMD) run -d --name qdrant --rm \
+		-p 6333:6333 \
+		-p 6334:6334 \
+		-v $(QDRANT_STORAGE):/qdrant/storage \
+		docker.io/qdrant/qdrant:latest
+
+stop-qdrant:
+	$(CONTAINER_CMD) stop qdrant
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Testing
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#   make test                — unit + binary integration tests (no podman needed)
+#   make test-integration    — all tests including full container lifecycle
+#   make coverage            — HTML coverage report at coverage/index.html
+#   make coverage-integration — coverage including podman tests
+#   make bench               — criterion benchmarks
+
+test:
+	cargo test --workspace
+
+test-integration:
+	ROMHACK_INTEGRATION=1 cargo test --workspace
+
+coverage: build-gami
+	cargo llvm-cov --workspace --lib --tests --html --output-dir coverage/
+	@echo "Report: coverage/index.html"
+
+coverage-integration: build-gami
+	ROMHACK_INTEGRATION=1 ROMHACK_ROOT=$(PWD) \
+	  cargo llvm-cov --workspace --lib --tests --html --output-dir coverage/
+	@echo "Report: coverage/index.html"
+
+bench:
+	cargo bench --workspace

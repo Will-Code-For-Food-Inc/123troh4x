@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "romhack": {
+      "type": "stdio",
+      "command": "/data/repos/romhack-playground/onmyoji/target/release/onmyoji",
+      "env": {
+        "ROMHACK_ROOT": "/data/repos/romhack-playground"
+      }
+    }
+  }
+}

@@ -423,10 +423,7 @@ fn open_debug_port_starts_container() {
 
 fn gba_rom_path() -> Option<String> {
     // Allow override via env; fall back to local Downloads copy.
-    std::env::var("ROMHACK_GBA_ROM").ok().or_else(|| {
-        let p = "/home/alex/Downloads/Pinball Tycoon/Pinball Tycoon (U).gba";
-        if std::path::Path::new(p).exists() { Some(p.into()) } else { None }
-    })
+    std::env::var("ROMHACK_GBA_ROM").ok()
 }
 
 fn with_gba_session<F: FnOnce(&str)>(f: F) {

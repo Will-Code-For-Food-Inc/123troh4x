@@ -42,8 +42,10 @@ target/
 shared/shim
 shared/gami
 
-# Machine-specific onmyoji config (path to repo root varies per machine)
+# Machine-specific config (paths and local tool settings vary per machine)
 onmyoji.toml
+.mcp.json
+.claude/settings.json
 coverage/
 
 # Qdrant persistent storage

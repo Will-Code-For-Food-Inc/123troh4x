@@ -17,6 +17,7 @@ FROM ubuntu:latest
 RUN apt update && apt upgrade -y
 
 RUN apt install -y \
+    binutils-arm-none-eabi \
     bison \
     cmake \
     curl \
@@ -36,5 +37,12 @@ RUN apt install -y \
     xxd \
     xz-utils \
     zsh
+
+# Build flips (IPS/BPS patcher) from source — not in apt
+RUN git clone --depth 1 https://github.com/Alcaro/Flips.git /tmp/flips \
+    && cd /tmp/flips \
+    && make flips \
+    && install -m 755 flips /usr/local/bin/flips \
+    && rm -rf /tmp/flips
 
 COPY --from=builder /build/target/release/gami /usr/local/bin/gami

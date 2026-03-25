@@ -7,7 +7,7 @@ use rmcp::{
 use serde::Deserialize;
 
 use crate::{podman, sessions::{Session, SessionStore}};
-use knowledge::{Annotation, Knowledge, RomInfo, hash_rom_file};
+use knowledge::{Annotation, Knowledge, RomInfo, hash_rom_file, parse_nm_output};
 use protocol::{Op, Request, Response};
 
 // ── Parameter types ───────────────────────────────────────────────────────────
@@ -112,6 +112,16 @@ struct GetAnnotationsParams {
     rom_id: i64,
     /// Address to fetch annotations for, decimal or 0x hex.
     address: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct IngestElfSymbolsParams {
+    /// Session ID returned by start_session.
+    session_id: String,
+    /// Absolute path to the ELF file inside the container.
+    elf_path: String,
+    /// ROM id to store symbols under (returned by register_rom).
+    rom_id: i64,
 }
 
 fn parse_addr(s: &str) -> Result<u32, String> {
@@ -396,6 +406,29 @@ impl OnmyojiServer {
                 })).collect();
                 serde_json::to_string(&arr).unwrap_or_else(|e| format!("error: {e}"))
             }
+        }
+    }
+
+    /// Run arm-none-eabi-nm on an ELF inside an active session and ingest the
+    /// symbol table into the knowledge store.  Returns a summary string with
+    /// the count of newly inserted symbols.
+    #[tool(description = "Run arm-none-eabi-nm on an ELF file inside an active container session and store the symbol table in the knowledge DB. Returns 'inserted N symbols' (0 if already cached).")]
+    fn ingest_elf_symbols(
+        &self,
+        Parameters(IngestElfSymbolsParams { session_id, elf_path, rom_id }): Parameters<IngestElfSymbolsParams>,
+    ) -> String {
+        let session = match self.sessions.get(&session_id) {
+            None => return format!("error: unknown session {session_id}"),
+            Some(s) => s,
+        };
+        let nm_out = match podman::nm_symbols(&session.container_id, &elf_path) {
+            Ok(o) => o,
+            Err(e) => return format!("error running nm on {elf_path}: {e}"),
+        };
+        let symbols = parse_nm_output(&nm_out);
+        match self.kb.register_symbols(rom_id, &symbols) {
+            Err(e) => format!("error storing symbols: {e}"),
+            Ok(n) => format!("inserted {n} symbols ({} total in nm output)", symbols.len()),
         }
     }
 

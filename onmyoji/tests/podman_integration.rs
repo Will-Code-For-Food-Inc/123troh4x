@@ -418,3 +418,48 @@ fn open_debug_port_starts_container() {
     // Cleanup
     let _ = podman::stop_container(&container_id);
 }
+
+// ── File copy (podman cp) ─────────────────────────────────────────────────────
+
+#[test]
+fn copy_to_and_from_container_roundtrip() {
+    if skip_unless_integration() { return; }
+    with_session(|ctr| {
+        let dir = tempfile::tempdir().expect("tempdir");
+
+        // Write a small test file on the host.
+        let host_src = dir.path().join("host_src.bin");
+        let payload = b"\xDE\xAD\xBE\xEF\x00\x01\x02\x03";
+        std::fs::write(&host_src, payload).expect("write host_src");
+
+        // Copy into the container.
+        podman::copy_to_container(ctr, host_src.to_str().unwrap(), "/tmp/test_payload.bin")
+            .expect("copy_to_container failed");
+
+        // Verify the file exists inside the container with correct content.
+        let verify = std::process::Command::new("podman")
+            .args(["exec", ctr, "xxd", "-p", "/tmp/test_payload.bin"])
+            .output()
+            .expect("podman exec xxd");
+        assert!(verify.status.success(), "xxd failed inside container");
+        let hex_out = String::from_utf8_lossy(&verify.stdout);
+        assert!(hex_out.contains("deadbeef"), "payload mismatch inside container: {hex_out}");
+
+        // Copy back to the host.
+        let host_dst = dir.path().join("host_dst.bin");
+        podman::copy_from_container(ctr, "/tmp/test_payload.bin", host_dst.to_str().unwrap())
+            .expect("copy_from_container failed");
+
+        let retrieved = std::fs::read(&host_dst).expect("read host_dst");
+        assert_eq!(retrieved, payload, "roundtrip content mismatch");
+    });
+}
+
+#[test]
+fn copy_to_container_bad_source_returns_error() {
+    if skip_unless_integration() { return; }
+    with_session(|ctr| {
+        let result = podman::copy_to_container(ctr, "/nonexistent/path/file.bin", "/tmp/x.bin");
+        assert!(result.is_err(), "expected error for missing source");
+    });
+}

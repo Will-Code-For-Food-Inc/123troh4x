@@ -7,6 +7,7 @@ use rmcp::{
 use serde::Deserialize;
 
 use crate::{podman, sessions::{Session, SessionStore}};
+use knowledge::{Annotation, Knowledge, RomInfo, hash_rom_file};
 use protocol::{Op, Request, Response};
 
 // ── Parameter types ───────────────────────────────────────────────────────────
@@ -44,21 +45,101 @@ struct DebugPortParams {
     port: Option<u16>,
 }
 
+// ── Parameter types (knowledge tools) ────────────────────────────────────────
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct HashRomParams {
+    /// Absolute path to the ROM file on the host.
+    path: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct RegisterRomParams {
+    /// CRC32 hash returned by hash_rom (8 hex chars).
+    hash: String,
+    /// Platform: gba, ds, nes, snes, gbc, gen, n64, ps1
+    platform: String,
+    /// Human-readable title (optional).
+    title: Option<String>,
+    /// Region string, e.g. "US", "JP", "EU" (optional).
+    region: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct LookupSymbolParams {
+    /// ROM id returned by register_rom.
+    rom_id: i64,
+    /// Virtual address (decimal or hex prefix 0x accepted).
+    address: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SearchSymbolsParams {
+    /// ROM id returned by register_rom.
+    rom_id: i64,
+    /// Substring to search for in symbol names (case-insensitive).
+    pattern: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SymbolsInRangeParams {
+    /// ROM id returned by register_rom.
+    rom_id: i64,
+    /// Start of range (inclusive), decimal or 0x hex.
+    start: String,
+    /// End of range (exclusive), decimal or 0x hex.
+    end: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct AddAnnotationParams {
+    /// ROM id returned by register_rom.
+    rom_id: i64,
+    /// Address the annotation is attached to, decimal or 0x hex.
+    address: String,
+    /// Free-form description of what this address does.
+    description: String,
+    /// Provenance tag: "user", "decomp", "community", etc.
+    #[serde(default = "default_source")]
+    source: String,
+}
+
+fn default_source() -> String { "user".into() }
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct GetAnnotationsParams {
+    /// ROM id returned by register_rom.
+    rom_id: i64,
+    /// Address to fetch annotations for, decimal or 0x hex.
+    address: String,
+}
+
+fn parse_addr(s: &str) -> Result<u32, String> {
+    let s = s.trim();
+    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        u32::from_str_radix(hex, 16).map_err(|e| e.to_string())
+    } else {
+        s.parse::<u32>().map_err(|e| e.to_string())
+    }
+}
+
 // ── Server ────────────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
 pub struct OnmyojiServer {
     root: String,
     sessions: SessionStore,
+    kb: Knowledge,
     tool_router: ToolRouter<Self>,
 }
 
 #[tool_router]
 impl OnmyojiServer {
-    pub fn new(root: String) -> Self {
+    pub fn new(root: String, kb: Knowledge) -> Self {
         Self {
             root,
             sessions: SessionStore::default(),
+            kb,
             tool_router: Self::tool_router(),
         }
     }
@@ -175,6 +256,146 @@ impl OnmyojiServer {
                 Ok(()) => format!("Stopped session {session_id}"),
                 Err(e) => format!("Failed to stop container: {e}"),
             },
+        }
+    }
+
+    // ── Knowledge tools ───────────────────────────────────────────────────────
+
+    /// Compute the CRC32 hash of a ROM file. Returns an 8-character lowercase hex string.
+    /// Use this hash to register the ROM and look up cached knowledge.
+    #[tool(description = "Compute the CRC32 hash of a ROM file. Returns an 8-char lowercase hex string used as the ROM's identity key.")]
+    fn hash_rom(&self, Parameters(HashRomParams { path }): Parameters<HashRomParams>) -> String {
+        match hash_rom_file(&path) {
+            Ok(h) => h,
+            Err(e) => format!("error: {e}"),
+        }
+    }
+
+    /// Register a ROM in the knowledge store. Returns the integer rom_id.
+    /// If the ROM hash is already registered, returns the existing id (idempotent).
+    #[tool(description = "Register a ROM in the knowledge store by hash. Returns the rom_id. Safe to call multiple times — returns the same id for the same hash.")]
+    fn register_rom(
+        &self,
+        Parameters(RegisterRomParams { hash, platform, title, region }): Parameters<RegisterRomParams>,
+    ) -> String {
+        match self.kb.register_rom(&RomInfo { hash, title, platform, region }) {
+            Ok(id) => id.to_string(),
+            Err(e) => format!("error: {e}"),
+        }
+    }
+
+    /// Look up the symbol at an exact address. Returns JSON or "null" if none found.
+    #[tool(description = "Look up the symbol at an exact virtual address in the knowledge store. Returns JSON with fields: address, size, kind, name, source.")]
+    fn lookup_symbol(
+        &self,
+        Parameters(LookupSymbolParams { rom_id, address }): Parameters<LookupSymbolParams>,
+    ) -> String {
+        let addr = match parse_addr(&address) {
+            Ok(a) => a,
+            Err(e) => return format!("error: invalid address '{address}': {e}"),
+        };
+        match self.kb.lookup_symbol(rom_id, addr) {
+            Err(e) => format!("error: {e}"),
+            Ok(None) => "null".to_owned(),
+            Ok(Some(sym)) => serde_json::json!({
+                "address": sym.address,
+                "size":    sym.size,
+                "kind":    sym.kind,
+                "name":    sym.name,
+                "source":  sym.source,
+            }).to_string(),
+        }
+    }
+
+    /// Search symbols by name substring (case-insensitive). Returns a JSON array.
+    #[tool(description = "Search symbols whose name contains the given pattern (case-insensitive substring match). Returns a JSON array of symbol objects.")]
+    fn search_symbols(
+        &self,
+        Parameters(SearchSymbolsParams { rom_id, pattern }): Parameters<SearchSymbolsParams>,
+    ) -> String {
+        match self.kb.lookup_symbols_by_name(rom_id, &pattern) {
+            Err(e) => format!("error: {e}"),
+            Ok(syms) => {
+                let arr: Vec<_> = syms.iter().map(|sym| serde_json::json!({
+                    "address": sym.address,
+                    "size":    sym.size,
+                    "kind":    sym.kind,
+                    "name":    sym.name,
+                    "source":  sym.source,
+                })).collect();
+                serde_json::to_string(&arr).unwrap_or_else(|e| format!("error: {e}"))
+            }
+        }
+    }
+
+    /// Return all symbols in a virtual address range [start, end). Returns a JSON array.
+    #[tool(description = "Return all symbols in the virtual address range [start, end). Returns a JSON array of symbol objects ordered by address.")]
+    fn symbols_in_range(
+        &self,
+        Parameters(SymbolsInRangeParams { rom_id, start, end }): Parameters<SymbolsInRangeParams>,
+    ) -> String {
+        let s = match parse_addr(&start) {
+            Ok(a) => a,
+            Err(e) => return format!("error: invalid start '{start}': {e}"),
+        };
+        let e = match parse_addr(&end) {
+            Ok(a) => a,
+            Err(e) => return format!("error: invalid end '{end}': {e}"),
+        };
+        match self.kb.symbols_in_range(rom_id, s, e) {
+            Err(err) => format!("error: {err}"),
+            Ok(syms) => {
+                let arr: Vec<_> = syms.iter().map(|sym| serde_json::json!({
+                    "address": sym.address,
+                    "size":    sym.size,
+                    "kind":    sym.kind,
+                    "name":    sym.name,
+                    "source":  sym.source,
+                })).collect();
+                serde_json::to_string(&arr).unwrap_or_else(|err| format!("error: {err}"))
+            }
+        }
+    }
+
+    /// Add a free-form annotation to an address in the knowledge store.
+    /// Returns the new annotation id.
+    #[tool(description = "Add a text annotation to a virtual address in the knowledge store. Returns the annotation id.")]
+    fn add_annotation(
+        &self,
+        Parameters(AddAnnotationParams { rom_id, address, description, source }): Parameters<AddAnnotationParams>,
+    ) -> String {
+        let addr = match parse_addr(&address) {
+            Ok(a) => a,
+            Err(e) => return format!("error: invalid address '{address}': {e}"),
+        };
+        let ann = Annotation { address: addr, description, validated: false, source };
+        match self.kb.add_annotation(rom_id, &ann) {
+            Ok(id) => id.to_string(),
+            Err(e) => format!("error: {e}"),
+        }
+    }
+
+    /// Get all annotations for a virtual address. Returns a JSON array.
+    #[tool(description = "Get all annotations attached to a virtual address. Returns a JSON array of annotation objects.")]
+    fn get_annotations(
+        &self,
+        Parameters(GetAnnotationsParams { rom_id, address }): Parameters<GetAnnotationsParams>,
+    ) -> String {
+        let addr = match parse_addr(&address) {
+            Ok(a) => a,
+            Err(e) => return format!("error: invalid address '{address}': {e}"),
+        };
+        match self.kb.get_annotations(rom_id, addr) {
+            Err(e) => format!("error: {e}"),
+            Ok(anns) => {
+                let arr: Vec<_> = anns.iter().map(|a| serde_json::json!({
+                    "address":     a.address,
+                    "description": a.description,
+                    "validated":   a.validated,
+                    "source":      a.source,
+                })).collect();
+                serde_json::to_string(&arr).unwrap_or_else(|e| format!("error: {e}"))
+            }
         }
     }
 

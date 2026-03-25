@@ -122,6 +122,36 @@ pub fn nm_symbols(container_id: &str, elf: &str) -> Result<String, String> {
     }
 }
 
+/// Copy a file from the host into a running container.
+/// `host_path` is an absolute path on the host.
+/// `container_path` is an absolute path inside the container.
+pub fn copy_to_container(container_id: &str, host_path: &str, container_path: &str) -> Result<(), String> {
+    let out = Command::new("podman")
+        .args(["cp", host_path, &format!("{container_id}:{container_path}")])
+        .output()
+        .map_err(|e| format!("podman cp failed: {e}"))?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_owned())
+    }
+}
+
+/// Copy a file from a running container to the host.
+/// `container_path` is an absolute path inside the container.
+/// `host_path` is an absolute path on the host.
+pub fn copy_from_container(container_id: &str, container_path: &str, host_path: &str) -> Result<(), String> {
+    let out = Command::new("podman")
+        .args(["cp", &format!("{container_id}:{container_path}"), host_path])
+        .output()
+        .map_err(|e| format!("podman cp failed: {e}"))?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_owned())
+    }
+}
+
 /// Build a platform image (and romhack-base first if needed).
 pub fn build_platform(root: &str, platform: &PlatformInfo) -> Result<String, String> {
     if !image_exists("romhack-base") {

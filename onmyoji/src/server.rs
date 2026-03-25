@@ -124,6 +124,26 @@ struct IngestElfSymbolsParams {
     rom_id: i64,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct CopyToSessionParams {
+    /// Session ID returned by start_session.
+    session_id: String,
+    /// Absolute path to the source file on the host.
+    host_path: String,
+    /// Absolute destination path inside the container.
+    container_path: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct CopyFromSessionParams {
+    /// Session ID returned by start_session.
+    session_id: String,
+    /// Absolute source path inside the container.
+    container_path: String,
+    /// Absolute destination path on the host.
+    host_path: String,
+}
+
 fn parse_addr(s: &str) -> Result<u32, String> {
     let s = s.trim();
     if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
@@ -429,6 +449,40 @@ impl OnmyojiServer {
         match self.kb.register_symbols(rom_id, &symbols) {
             Err(e) => format!("error storing symbols: {e}"),
             Ok(n) => format!("inserted {n} symbols ({} total in nm output)", symbols.len()),
+        }
+    }
+
+    /// Copy a file from the host into an active container session.
+    /// Use this to move a ROM or other asset into the container for binary editing.
+    #[tool(description = "Copy a file from the host filesystem into an active container session. Use this to load a ROM into the container before running binary editing ops.")]
+    fn copy_to_session(
+        &self,
+        Parameters(CopyToSessionParams { session_id, host_path, container_path }): Parameters<CopyToSessionParams>,
+    ) -> String {
+        let session = match self.sessions.get(&session_id) {
+            None => return format!("error: unknown session {session_id}"),
+            Some(s) => s,
+        };
+        match podman::copy_to_container(&session.container_id, &host_path, &container_path) {
+            Ok(()) => format!("copied {host_path} → {container_path}"),
+            Err(e) => format!("error: {e}"),
+        }
+    }
+
+    /// Copy a file from an active container session back to the host.
+    /// Use this to retrieve patch files, built binaries, or other outputs.
+    #[tool(description = "Copy a file from an active container session to the host filesystem. Use this to retrieve patch files or build outputs after binary editing.")]
+    fn copy_from_session(
+        &self,
+        Parameters(CopyFromSessionParams { session_id, container_path, host_path }): Parameters<CopyFromSessionParams>,
+    ) -> String {
+        let session = match self.sessions.get(&session_id) {
+            None => return format!("error: unknown session {session_id}"),
+            Some(s) => s,
+        };
+        match podman::copy_from_container(&session.container_id, &container_path, &host_path) {
+            Ok(()) => format!("copied {container_path} → {host_path}"),
+            Err(e) => format!("error: {e}"),
         }
     }
 

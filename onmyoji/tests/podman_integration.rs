@@ -108,8 +108,8 @@ fn run_op_check_git() {
 fn run_op_check_arm_gcc() {
     if skip_unless_integration() { return; }
     with_session(|ctr| {
-        let resp = send(ctr, Op::Check { tool: "gcc-arm-none-eabi".into() });
-        assert!(resp.ok, "gcc-arm-none-eabi should be installed in dshax");
+        let resp = send(ctr, Op::Check { tool: "arm-none-eabi-gcc".into() });
+        assert!(resp.ok, "arm-none-eabi-gcc should be installed in dshax");
     });
 }
 
@@ -129,9 +129,9 @@ fn run_op_list_ops() {
 fn run_op_git_status_in_vendor() {
     if skip_unless_integration() { return; }
     with_session(|ctr| {
-        let resp = send_in(ctr, Op::GitStatus, "/dshax/vendor");
-        // vendor/pokeplatinum is a git repo — git status should succeed
-        assert!(resp.ok, "git status in vendor failed: {:?}", resp.stderr);
+        // pokeplatinum is the git repo — run status there, not in the vendor root
+        let resp = send_in(ctr, Op::GitStatus, "/dshax/vendor/pokeplatinum");
+        assert!(resp.ok, "git status in pokeplatinum failed: {:?}", resp.stderr);
         assert_eq!(resp.exit_code, 0);
     });
 }

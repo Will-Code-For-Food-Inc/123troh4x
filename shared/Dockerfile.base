@@ -3,6 +3,12 @@ WORKDIR /build
 COPY tsukumogami/ ./tsukumogami/
 COPY protocol/ ./protocol/
 COPY Cargo.toml ./
+# Cargo requires all workspace members to exist to resolve the manifest.
+# Copy onmyoji/Cargo.toml and stub out src/ — we only build tsukumogami here.
+COPY onmyoji/Cargo.toml ./onmyoji/Cargo.toml
+RUN mkdir -p onmyoji/src onmyoji/benches && \
+    echo 'fn main(){}' > onmyoji/src/main.rs && \
+    echo 'fn main(){}' > onmyoji/benches/sessions.rs
 # Build only the tsukumogami (gami) binary for the container image
 RUN cargo build --release -p tsukumogami
 

@@ -19,6 +19,16 @@ struct PlatformParam {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct BuildPlatformParam {
+    /// Platform name: nes, snes, gbc, gba, gen, ds, n64, ps1
+    platform: String,
+    /// If true, always rebuild romhack-base first (picks up gami or Dockerfile changes).
+    /// If false (default), only builds base if the image doesn't exist yet.
+    #[serde(default)]
+    force: bool,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct SessionParam {
     /// Session ID returned by start_session
     session_id: String,
@@ -211,12 +221,14 @@ impl OnmyojiServer {
         }
     }
 
-    /// Build the container image for a platform. Builds romhack-base first if needed.
-    #[tool(description = "Build the container image for a platform. Builds romhack-base first if needed.")]
-    fn build_platform(&self, Parameters(PlatformParam { platform }): Parameters<PlatformParam>) -> String {
+    /// Build the container image for a platform.
+    /// Set force=true to always rebuild romhack-base first (required after any
+    /// change to shared/Dockerfile.base or the gami binary).
+    #[tool(description = "Build the container image for a platform. Set force=true to rebuild romhack-base first — required after any change to the base Dockerfile or the gami binary. Default (force=false) only builds base if it doesn't exist yet.")]
+    fn build_platform(&self, Parameters(BuildPlatformParam { platform, force }): Parameters<BuildPlatformParam>) -> String {
         match podman::get_platform(&platform) {
             None => format!("Unknown platform: {platform}"),
-            Some(info) => match podman::build_platform(&self.root, &info) {
+            Some(info) => match podman::build_platform(&self.root, &info, force) {
                 Ok(msg) => msg,
                 Err(e) => e,
             },

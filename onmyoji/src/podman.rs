@@ -152,15 +152,19 @@ pub fn copy_from_container(container_id: &str, container_path: &str, host_path: 
     }
 }
 
-/// Build a platform image (and romhack-base first if needed).
-pub fn build_platform(root: &str, platform: &PlatformInfo) -> Result<String, String> {
-    if !image_exists("romhack-base") {
+/// Build a platform image.
+///
+/// If `force` is true, always rebuild `romhack-base` first (picks up any
+/// changes to `shared/Dockerfile.base` or the `gami` binary).
+/// If `force` is false, only builds base if the image doesn't exist yet.
+pub fn build_platform(root: &str, platform: &PlatformInfo, force: bool) -> Result<String, String> {
+    if force || !image_exists("romhack-base") {
         let out = Command::new("podman")
             .args([
                 "build",
                 "-f", &format!("{root}/shared/Dockerfile.base"),
                 "-t", "romhack-base",
-                &root,
+                root,
             ])
             .output()
             .map_err(|e| format!("podman build base failed: {e}"))?;

@@ -5,6 +5,44 @@
 /// executes the pre-defined commands corresponding to each op.
 use serde::{Deserialize, Serialize};
 
+/// CPU architecture — determines instruction encoding for read/write ops.
+/// Variants beyond Thumb are accepted by the protocol but return an error
+/// from tsukumogami until their toolchain support is implemented.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum Arch {
+    Thumb,
+    Arm32,
+    Mips32,
+    Mos6502,
+    Snes65816,
+}
+
+/// Patch file format for GeneratePatch / ApplyPatch.
+/// Bps is accepted by the protocol but returns an error until implemented.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum PatchFormat {
+    Ips,
+    Bps,
+}
+
+/// Structured error returned in Response::error when WriteInstruction
+/// cannot proceed because the new instruction encodes to a different
+/// byte length than the instruction currently at that offset.
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct SizeMismatchError {
+    pub kind: String, // always "size_mismatch"
+    pub existing_bytes: u32,
+    pub new_bytes: u32,
+}
+
+impl SizeMismatchError {
+    pub fn new(existing_bytes: u32, new_bytes: u32) -> Self {
+        Self { kind: "size_mismatch".into(), existing_bytes, new_bytes }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum Op {
@@ -38,6 +76,48 @@ pub enum Op {
     },
     /// Query what ops this agent supports.
     ListOps,
+
+    // ── Binary editing ops ────────────────────────────────────────────────────
+    /// Decode the instruction at offset and return its mnemonic + byte length.
+    ReadInstruction {
+        file: String,
+        offset: u32,
+        arch: Arch,
+    },
+    /// Encode instruction string, validate size matches existing instruction,
+    /// then write bytes at offset. Returns SizeMismatchError if sizes differ.
+    WriteInstruction {
+        file: String,
+        offset: u32,
+        arch: Arch,
+        instruction: String,
+    },
+    /// Read raw bytes at offset, returned as a lowercase hex string.
+    ReadBytes {
+        file: String,
+        offset: u32,
+        length: u32,
+    },
+    /// Write raw bytes at offset. bytes is a lowercase hex string (e.g. "deadbeef").
+    WriteBytes {
+        file: String,
+        offset: u32,
+        bytes: String,
+    },
+    /// Diff two ROM files and emit a patch file.
+    GeneratePatch {
+        original: String,
+        modified: String,
+        output: String,
+        format: PatchFormat,
+    },
+    /// Apply a patch file to a ROM. Writes output to a separate file.
+    ApplyPatch {
+        rom: String,
+        patch: String,
+        output: String,
+        format: PatchFormat,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -270,6 +350,110 @@ mod tests {
     fn unknown_op_tag_is_error() {
         let bad = r#"{"op":"teleport","destination":"mars"}"#;
         assert!(serde_json::from_str::<Op>(bad).is_err());
+    }
+
+    // ── Arch + PatchFormat roundtrips ─────────────────────────────────────────
+
+    #[test]
+    fn arch_all_variants_roundtrip() {
+        let archs = [Arch::Thumb, Arch::Arm32, Arch::Mips32, Arch::Mos6502, Arch::Snes65816];
+        for arch in &archs {
+            let json = serde_json::to_string(arch).unwrap();
+            let back: Arch = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, *arch);
+        }
+    }
+
+    #[test]
+    fn arch_thumb_serializes_to_snake_case() {
+        let json = serde_json::to_string(&Arch::Thumb).unwrap();
+        assert_eq!(json, r#""thumb""#);
+    }
+
+    #[test]
+    fn arch_unknown_tag_is_error() {
+        assert!(serde_json::from_str::<Arch>(r#""z80""#).is_err());
+    }
+
+    #[test]
+    fn patchformat_roundtrip() {
+        assert_eq!(serde_json::to_string(&PatchFormat::Ips).unwrap(), r#""ips""#);
+        assert_eq!(serde_json::to_string(&PatchFormat::Bps).unwrap(), r#""bps""#);
+    }
+
+    // ── Binary editing op roundtrips ──────────────────────────────────────────
+
+    #[test]
+    fn read_instruction_roundtrip() {
+        let op = Op::ReadInstruction {
+            file: "rom.gba".into(),
+            offset: 0x8000100,
+            arch: Arch::Thumb,
+        };
+        assert_eq!(roundtrip(&op), op);
+    }
+
+    #[test]
+    fn write_instruction_roundtrip() {
+        let op = Op::WriteInstruction {
+            file: "rom.gba".into(),
+            offset: 0x8000100,
+            arch: Arch::Thumb,
+            instruction: "BEQ 0x08000200".into(),
+        };
+        assert_eq!(roundtrip(&op), op);
+    }
+
+    #[test]
+    fn read_bytes_roundtrip() {
+        let op = Op::ReadBytes { file: "rom.gba".into(), offset: 0x100, length: 16 };
+        assert_eq!(roundtrip(&op), op);
+    }
+
+    #[test]
+    fn write_bytes_roundtrip() {
+        let op = Op::WriteBytes {
+            file: "rom.gba".into(),
+            offset: 0x100,
+            bytes: "deadbeef".into(),
+        };
+        assert_eq!(roundtrip(&op), op);
+    }
+
+    #[test]
+    fn generate_patch_roundtrip() {
+        let op = Op::GeneratePatch {
+            original: "rom.gba".into(),
+            modified: "rom_modified.gba".into(),
+            output: "hack.ips".into(),
+            format: PatchFormat::Ips,
+        };
+        assert_eq!(roundtrip(&op), op);
+    }
+
+    #[test]
+    fn apply_patch_roundtrip() {
+        let op = Op::ApplyPatch {
+            rom: "rom.gba".into(),
+            patch: "hack.ips".into(),
+            output: "rom_patched.gba".into(),
+            format: PatchFormat::Ips,
+        };
+        assert_eq!(roundtrip(&op), op);
+    }
+
+    // ── SizeMismatchError ─────────────────────────────────────────────────────
+
+    #[test]
+    fn size_mismatch_error_shape() {
+        let e = SizeMismatchError::new(2, 4);
+        assert_eq!(e.kind, "size_mismatch");
+        assert_eq!(e.existing_bytes, 2);
+        assert_eq!(e.new_bytes, 4);
+        let json = serde_json::to_string(&e).unwrap();
+        assert!(json.contains("\"kind\":\"size_mismatch\""));
+        assert!(json.contains("\"existing_bytes\":2"));
+        assert!(json.contains("\"new_bytes\":4"));
     }
 
 }

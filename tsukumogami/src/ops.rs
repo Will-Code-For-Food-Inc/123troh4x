@@ -3,6 +3,8 @@
 /// Each function returns a Vec<String> representing the full argv — no shell
 /// interpolation, no user-controlled strings in command position.
 
+use protocol::{Arch, Response, SizeMismatchError};
+
 pub fn build_cmd(target: Option<&str>, jobs: Option<u8>) -> Vec<String> {
     let mut args = vec!["make".into()];
     if let Some(j) = jobs {
@@ -62,27 +64,262 @@ pub fn grep_cmd(pattern: &str, path: Option<&str>, recursive: bool) -> Vec<Strin
 }
 
 pub fn list_ops() -> String {
-    "build, clean, check, disassemble, hex_dump, grep, git_status, git_diff, list_ops".into()
+    "build, clean, check, disassemble, hex_dump, grep, git_status, git_diff, \
+     read_instruction, write_instruction, read_bytes, write_bytes, \
+     generate_patch, apply_patch, list_ops"
+        .into()
+}
+
+// ── Binary editing — native Rust file I/O ─────────────────────────────────────
+
+use std::io::{Read, Seek, SeekFrom, Write as IoWrite};
+
+/// Read `length` bytes at `offset` from `file`, return as lowercase hex string.
+pub fn read_bytes(id: &str, file: &str, offset: u32, length: u32) -> Response {
+    let result = (|| -> std::io::Result<String> {
+        let mut f = std::fs::File::open(file)?;
+        f.seek(SeekFrom::Start(offset as u64))?;
+        let mut buf = vec![0u8; length as usize];
+        f.read_exact(&mut buf)?;
+        Ok(buf.iter().map(|b| format!("{b:02x}")).collect())
+    })();
+
+    match result {
+        Ok(hex) => Response {
+            id: id.into(),
+            ok: true,
+            stdout: Some(hex),
+            stderr: None,
+            exit_code: 0,
+            error: None,
+        },
+        Err(e) => Response::err(id, format!("read_bytes failed: {e}")),
+    }
+}
+
+/// Write bytes (hex string) at `offset` into `file`.
+pub fn write_bytes(id: &str, file: &str, offset: u32, hex: &str) -> Response {
+    let bytes = match decode_hex(hex) {
+        Ok(b) => b,
+        Err(e) => return Response::err(id, format!("invalid hex string: {e}")),
+    };
+
+    let result = (|| -> std::io::Result<()> {
+        let mut f = std::fs::OpenOptions::new().write(true).open(file)?;
+        f.seek(SeekFrom::Start(offset as u64))?;
+        f.write_all(&bytes)
+    })();
+
+    match result {
+        Ok(()) => Response {
+            id: id.into(),
+            ok: true,
+            stdout: None,
+            stderr: None,
+            exit_code: 0,
+            error: None,
+        },
+        Err(e) => Response::err(id, format!("write_bytes failed: {e}")),
+    }
+}
+
+fn decode_hex(s: &str) -> Result<Vec<u8>, String> {
+    let s = s.trim();
+    if s.len() % 2 != 0 {
+        return Err("odd number of hex digits".into());
+    }
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|e| e.to_string()))
+        .collect()
+}
+
+// ── Instruction ops — toolchain-backed ───────────────────────────────────────
+
+/// Build the objdump command to disassemble one instruction at `offset`.
+pub fn read_instruction_cmd(file: &str, offset: u32, arch: &Arch) -> Result<Vec<String>, String> {
+    match arch {
+        Arch::Thumb => Ok(vec![
+            "arm-none-eabi-objdump".into(),
+            "-b".into(), "binary".into(),
+            "-m".into(), "arm".into(),
+            "--disassembler-options=force-thumb".into(),
+            "-D".into(),
+            format!("--start-address=0x{offset:x}"),
+            format!("--stop-address=0x{:x}", offset + 4), // max Thumb2 width
+            file.into(),
+        ]),
+        _ => Err(format!("arch {arch:?} not yet implemented")),
+    }
+}
+
+/// Assemble one instruction string to a raw binary via arm-none-eabi-as + objcopy.
+/// Reads instruction from stdin (pass as `\t<instruction>\n`).
+/// Returns (as_args, objcopy_args) — caller runs them in sequence.
+pub fn assemble_thumb_cmds(obj_path: &str, bin_path: &str) -> (Vec<String>, Vec<String>) {
+    let as_args = vec![
+        "arm-none-eabi-as".into(),
+        "-mthumb".into(),
+        "-o".into(), obj_path.into(),
+        "-".into(), // read from stdin
+    ];
+    let objcopy_args = vec![
+        "arm-none-eabi-objcopy".into(),
+        "-O".into(), "binary".into(),
+        "--only-section=.text".into(),
+        obj_path.into(),
+        bin_path.into(),
+    ];
+    (as_args, objcopy_args)
+}
+
+/// Multi-step WriteInstruction:
+/// 1. Disassemble at offset to learn existing byte count.
+/// 2. Assemble new instruction string via stdin.
+/// 3. Extract raw bytes with objcopy.
+/// 4. Validate sizes match.
+/// 5. Write bytes at offset via write_bytes.
+pub fn write_instruction(
+    id: &str,
+    file: &str,
+    offset: u32,
+    arch: &Arch,
+    instruction: &str,
+    workdir: Option<&str>,
+) -> Response {
+    if !matches!(arch, Arch::Thumb) {
+        return Response::err(id, format!("arch {arch:?} not yet implemented"));
+    }
+
+    // Phase 1: disassemble existing instruction to get byte count.
+    let disasm_args = match read_instruction_cmd(file, offset, arch) {
+        Ok(a) => a,
+        Err(e) => return Response::err(id, e),
+    };
+    let disasm = run_op(id, disasm_args, workdir);
+    if !disasm.ok {
+        return disasm;
+    }
+    let existing_bytes = match parse_objdump_byte_count(disasm.stdout.as_deref().unwrap_or("")) {
+        Some(n) => n,
+        None => return Response::err(id, "failed to parse objdump output for existing instruction"),
+    };
+
+    // Phase 2: assemble new instruction, write obj + bin to temp paths.
+    let obj_path = format!("/tmp/gami_{id}.o");
+    let bin_path = format!("/tmp/gami_{id}.bin");
+    let (as_args, objcopy_args) = assemble_thumb_cmds(&obj_path, &bin_path);
+
+    let asm_input = format!("\t{instruction}\n");
+    let as_resp = run_op_with_stdin(id, as_args, workdir, asm_input.as_bytes());
+    if !as_resp.ok {
+        return as_resp;
+    }
+    let objcopy_resp = run_op(id, objcopy_args, workdir);
+    if !objcopy_resp.ok {
+        return objcopy_resp;
+    }
+
+    // Phase 3: read assembled bytes to measure new size.
+    let new_bytes = match std::fs::metadata(&bin_path) {
+        Ok(m) => m.len() as u32,
+        Err(e) => return Response::err(id, format!("failed to stat assembled binary: {e}")),
+    };
+
+    // Phase 4: size check.
+    if new_bytes != existing_bytes {
+        let mismatch = SizeMismatchError::new(existing_bytes, new_bytes);
+        let _ = std::fs::remove_file(&obj_path);
+        let _ = std::fs::remove_file(&bin_path);
+        return Response {
+            id: id.into(),
+            ok: false,
+            stdout: None,
+            stderr: None,
+            exit_code: -2,
+            error: Some(serde_json::to_string(&mismatch).unwrap_or_default()),
+        };
+    }
+
+    // Phase 5: read the assembled bytes and write them into the ROM.
+    let assembled_hex = match std::fs::read(&bin_path) {
+        Ok(b) => b.iter().map(|byte| format!("{byte:02x}")).collect::<String>(),
+        Err(e) => return Response::err(id, format!("failed to read assembled binary: {e}")),
+    };
+    let _ = std::fs::remove_file(&obj_path);
+    let _ = std::fs::remove_file(&bin_path);
+
+    write_bytes(id, file, offset, &assembled_hex)
+}
+
+/// Parse objdump -D output to extract byte count of the first instruction.
+/// Sample line: "   8000100:\t01 d0       \tbne.n\t0x8000104"
+/// Returns the number of bytes in the hex column (space-separated pairs).
+fn parse_objdump_byte_count(output: &str) -> Option<u32> {
+    for line in output.lines() {
+        // Skip header lines (no tab after address)
+        let Some(after_addr) = line.split_once(':') else { continue };
+        let cols: Vec<&str> = after_addr.1.splitn(3, '\t').collect();
+        if cols.len() < 2 { continue; }
+        let hex_col = cols[0].trim();
+        if hex_col.is_empty() { continue; }
+        let count = hex_col.split_whitespace().count() as u32;
+        if count > 0 { return Some(count); }
+    }
+    None
+}
+
+// ── Patch ops — flips ─────────────────────────────────────────────────────────
+
+pub fn generate_patch_ips_cmd(original: &str, modified: &str, output: &str) -> Vec<String> {
+    vec![
+        "flips".into(),
+        "--create".into(), "--ips".into(),
+        original.into(), modified.into(), output.into(),
+    ]
+}
+
+pub fn apply_patch_ips_cmd(rom: &str, patch: &str, output: &str) -> Vec<String> {
+    vec![
+        "flips".into(),
+        "--apply".into(), "--ips".into(),
+        patch.into(), rom.into(), output.into(),
+    ]
 }
 
 // ── Execution ──────────────────────────────────────────────────────────────────
 
-use protocol::Response;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 pub fn run_op(id: &str, args: Vec<String>, workdir: Option<&str>) -> Response {
+    run_op_with_stdin(id, args, workdir, &[])
+}
+
+pub fn run_op_with_stdin(id: &str, args: Vec<String>, workdir: Option<&str>, stdin: &[u8]) -> Response {
     let Some((cmd, rest)) = args.split_first() else {
         return Response::err(id, "empty command");
     };
 
+    let stdin_mode = if stdin.is_empty() { Stdio::null() } else { Stdio::piped() };
     let mut command = Command::new(cmd);
-    command.args(rest);
+    command.args(rest).stdin(stdin_mode);
     if let Some(dir) = workdir {
         command.current_dir(dir);
     }
 
-    match command.output() {
-        Err(e) => Response::err(id, format!("failed to spawn {cmd}: {e}")),
+    let mut child = match command.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
+        Err(e) => return Response::err(id, format!("failed to spawn {cmd}: {e}")),
+        Ok(c) => c,
+    };
+
+    if !stdin.is_empty() {
+        if let Some(mut s) = child.stdin.take() {
+            let _ = s.write_all(stdin);
+        }
+    }
+
+    match child.wait_with_output() {
+        Err(e) => Response::err(id, format!("failed to wait for {cmd}: {e}")),
         Ok(o) => Response::success(
             id,
             String::from_utf8_lossy(&o.stdout).into_owned(),

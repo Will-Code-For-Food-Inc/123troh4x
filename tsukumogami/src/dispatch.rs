@@ -1,4 +1,4 @@
-use protocol::{Op, Request, Response};
+use protocol::{Op, PatchFormat, Request, Response};
 
 use crate::ops;
 
@@ -37,6 +37,39 @@ pub fn dispatch(req: Request) -> Response {
             exit_code: 0,
             error: None,
         },
+
+        // ── Binary editing ops ────────────────────────────────────────────────
+        Op::ReadBytes { file, offset, length } => {
+            ops::read_bytes(&id, &file, offset, length)
+        }
+        Op::WriteBytes { file, offset, bytes } => {
+            ops::write_bytes(&id, &file, offset, &bytes)
+        }
+        Op::ReadInstruction { file, offset, arch } => {
+            match ops::read_instruction_cmd(&file, offset, &arch) {
+                Err(e) => Response::err(&id, e),
+                Ok(args) => ops::run_op(&id, args, workdir),
+            }
+        }
+        Op::WriteInstruction { file, offset, arch, instruction } => {
+            ops::write_instruction(&id, &file, offset, &arch, &instruction, workdir)
+        }
+        Op::GeneratePatch { original, modified, output, format } => {
+            match format {
+                PatchFormat::Bps => Response::err(&id, "BPS format not yet implemented"),
+                PatchFormat::Ips => {
+                    ops::run_op(&id, ops::generate_patch_ips_cmd(&original, &modified, &output), workdir)
+                }
+            }
+        }
+        Op::ApplyPatch { rom, patch, output, format } => {
+            match format {
+                PatchFormat::Bps => Response::err(&id, "BPS format not yet implemented"),
+                PatchFormat::Ips => {
+                    ops::run_op(&id, ops::apply_patch_ips_cmd(&rom, &patch, &output), workdir)
+                }
+            }
+        }
     }
 }
 

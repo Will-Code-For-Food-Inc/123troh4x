@@ -6,7 +6,7 @@ use rmcp::{
 };
 use serde::Deserialize;
 
-use crate::{podman, sessions::{Session, SessionStore}};
+use crate::{podman, rag::RagStore, sessions::{Session, SessionStore}};
 use knowledge::{Annotation, Knowledge, RomInfo, hash_rom_file, parse_nm_output};
 use protocol::{Op, Request, Response};
 
@@ -165,6 +165,42 @@ struct ListBuildTargetsParams {
     file: Option<String>,
 }
 
+// ── Parameter types (RAG / docs tools) ───────────────────────────────────────
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct IngestTextParams {
+    /// Qdrant collection name to store the document in (e.g. "gba_docs", "game_knowledge").
+    collection: String,
+    /// The text content to ingest.
+    text: String,
+    /// Human-readable source label (e.g. "GBATEK", "devkitPro", "manual note").
+    source: String,
+    /// Optional platform tag: gba, ds, nes, etc.
+    platform: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct IngestFileParams {
+    /// Qdrant collection name.
+    collection: String,
+    /// Absolute path to a text or markdown file on the host.
+    path: String,
+    /// Human-readable source label.
+    source: String,
+    /// Optional platform tag.
+    platform: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SearchDocsParams {
+    /// Qdrant collection to search.
+    collection: String,
+    /// Natural language query.
+    query: String,
+    /// Number of results to return (default 5).
+    limit: Option<u64>,
+}
+
 fn parse_addr(s: &str) -> Result<u32, String> {
     let s = s.trim();
     if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
@@ -181,16 +217,22 @@ pub struct OnmyojiServer {
     root: String,
     sessions: SessionStore,
     kb: Knowledge,
+    rag: Option<RagStore>,
     tool_router: ToolRouter<Self>,
 }
 
 #[tool_router]
 impl OnmyojiServer {
     pub fn new(root: String, kb: Knowledge) -> Self {
+        Self::new_with_rag(root, kb, None)
+    }
+
+    pub fn new_with_rag(root: String, kb: Knowledge, rag: Option<RagStore>) -> Self {
         Self {
             root,
             sessions: SessionStore::default(),
             kb,
+            rag,
             tool_router: Self::tool_router(),
         }
     }
@@ -542,6 +584,79 @@ impl OnmyojiServer {
                     parts.join("\n")
                 }
             }
+        }
+    }
+
+    // ── RAG / docs tools ──────────────────────────────────────────────────────
+
+    /// Ingest text into the Qdrant vector store.
+    #[tool(description = "Ingest a block of text into a Qdrant collection. Use this to add platform docs, hardware references, or game-specific notes so they can be retrieved by search_docs.")]
+    async fn ingest_text(
+        &self,
+        Parameters(IngestTextParams { collection, text, source, platform }): Parameters<IngestTextParams>,
+    ) -> String {
+        let Some(rag) = &self.rag else {
+            return "Qdrant not available (set QDRANT_URL to enable doc storage).".into();
+        };
+        match rag.ingest(&collection, &text, &source, platform.as_deref()).await {
+            Ok(n) => format!("Ingested {n} chunk(s) into '{collection}' from source '{source}'."),
+            Err(e) => format!("ingest_text error: {e}"),
+        }
+    }
+
+    /// Ingest a file from the host into the Qdrant vector store.
+    #[tool(description = "Read a text or markdown file from disk and ingest it into a Qdrant collection. Useful for bulk-loading platform docs or dumping notes.")]
+    async fn ingest_file(
+        &self,
+        Parameters(IngestFileParams { collection, path, source, platform }): Parameters<IngestFileParams>,
+    ) -> String {
+        let Some(rag) = &self.rag else {
+            return "Qdrant not available (set QDRANT_URL to enable doc storage).".into();
+        };
+        let text = match std::fs::read_to_string(&path) {
+            Ok(t) => t,
+            Err(e) => return format!("Failed to read {path}: {e}"),
+        };
+        match rag.ingest(&collection, &text, &source, platform.as_deref()).await {
+            Ok(n) => format!("Ingested {n} chunk(s) from '{path}' into '{collection}'."),
+            Err(e) => format!("ingest_file error: {e}"),
+        }
+    }
+
+    /// Semantic search over a Qdrant collection.
+    #[tool(description = "Search the vector knowledge base with a natural language query. Returns the most relevant doc chunks with their source labels and similarity scores.")]
+    async fn search_docs(
+        &self,
+        Parameters(SearchDocsParams { collection, query, limit }): Parameters<SearchDocsParams>,
+    ) -> String {
+        let Some(rag) = &self.rag else {
+            return "Qdrant not available (set QDRANT_URL to enable doc search).".into();
+        };
+        let limit = limit.unwrap_or(5);
+        match rag.search(&collection, &query, limit).await {
+            Err(e) => format!("search_docs error: {e}"),
+            Ok(hits) if hits.is_empty() => "No results found.".into(),
+            Ok(hits) => hits
+                .into_iter()
+                .enumerate()
+                .map(|(i, h)| {
+                    format!("[{}] score={:.3} source={}\n{}", i + 1, h.score, h.source, h.text)
+                })
+                .collect::<Vec<_>>()
+                .join("\n\n---\n\n"),
+        }
+    }
+
+    /// List Qdrant collections.
+    #[tool(description = "List all Qdrant collections in the knowledge base.")]
+    async fn list_doc_collections(&self) -> String {
+        let Some(rag) = &self.rag else {
+            return "Qdrant not available.".into();
+        };
+        match rag.list_collections().await {
+            Ok(cols) if cols.is_empty() => "No collections yet.".into(),
+            Ok(cols) => cols.join("\n"),
+            Err(e) => format!("list_doc_collections error: {e}"),
         }
     }
 

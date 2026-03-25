@@ -1,4 +1,4 @@
-use onmyoji::server;
+use onmyoji::{rag::RagStore, server};
 
 use anyhow::{Context, Result};
 use knowledge::Knowledge;
@@ -22,7 +22,21 @@ async fn main() -> Result<()> {
     let kb = Knowledge::open(&kb_path)
         .with_context(|| format!("failed to open knowledge DB at {kb_path}"))?;
 
-    let server = OnmyojiServer::new(root, kb);
+    // Qdrant / RAG: optional — silently skipped if QDRANT_URL is unset or unreachable.
+    let qdrant_url = std::env::var("QDRANT_URL")
+        .unwrap_or_else(|_| "http://localhost:6333".into());
+    let rag = match RagStore::new(&qdrant_url) {
+        Ok(r) => {
+            tracing::info!("Qdrant connected at {qdrant_url}");
+            Some(r)
+        }
+        Err(e) => {
+            tracing::warn!("Qdrant unavailable ({qdrant_url}): {e} — doc tools disabled");
+            None
+        }
+    };
+
+    let server = OnmyojiServer::new_with_rag(root, kb, rag);
     let service = server.serve(stdio()).await?;
     service.waiting().await?;
     Ok(())

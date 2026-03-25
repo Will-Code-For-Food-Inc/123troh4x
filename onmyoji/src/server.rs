@@ -235,7 +235,7 @@ impl OnmyojiServer {
 
     /// Run a typed operation in an active session.
     #[tool(
-        description = "Run a typed operation in an active container session. `op` is one of: build, clean, check, disassemble, hex_dump, grep, git_status, git_diff, list_ops. `params` is an op-specific JSON object."
+        description = "Run a typed operation in an active container session. `op` is one of: build, clean, check, disassemble, hex_dump, grep, git_status, git_diff, list_ops, read_bytes, write_bytes, read_instruction, write_instruction, generate_patch, apply_patch. `params` is an op-specific JSON object (e.g. {\"file\":\"/gbahax/rom.gba\",\"offset\":0x8000100,\"arch\":\"Thumb\"} for read_instruction)."
     )]
     fn run_op(&self, Parameters(RunOpParams { session_id, op, params, workdir }): Parameters<RunOpParams>) -> String {
         let session = match self.sessions.get(&session_id) {

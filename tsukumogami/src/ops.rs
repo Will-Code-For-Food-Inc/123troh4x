@@ -50,6 +50,80 @@ pub fn hexdump_cmd(file: &str, offset: Option<u32>, length: Option<u32>) -> Vec<
     args
 }
 
+/// List Makefile targets by running `make -pRrq` and parsing the output.
+/// Returns a newline-separated list of target names, one per line.
+/// Filters out implicit/special targets (those starting with `.` or containing `%`).
+///
+/// `workdir` sets the working directory for the make invocation.
+/// `file` is the path to the Makefile, relative to workdir (default: "Makefile").
+pub fn list_targets(id: &str, file: &str, workdir: Option<&str>) -> Response {
+    use std::process::Command;
+
+    // `make -pRrq` dumps the internal database without running anything.
+    // Exit code 2 means "targets out of date" — normal for this invocation.
+    let mut cmd = Command::new("make");
+    cmd.args(["-pRrq", "-f", file]);
+    if let Some(wd) = workdir {
+        cmd.current_dir(wd);
+    }
+
+    let output = match cmd.output() {
+        Err(e) => {
+            return Response {
+                id: id.to_owned(),
+                ok: false,
+                stdout: None,
+                stderr: Some(format!("make not found or failed to spawn: {e}")),
+                exit_code: -1,
+                error: Some(e.to_string()),
+            };
+        }
+        Ok(o) => o,
+    };
+
+    let exit_code = output.status.code().unwrap_or(-1);
+    let targets = parse_make_targets(&String::from_utf8_lossy(&output.stdout));
+    let stdout = targets.join("\n");
+
+    Response {
+        id: id.to_owned(),
+        ok: true,
+        stdout: if stdout.is_empty() { None } else { Some(stdout) },
+        stderr: if output.stderr.is_empty() {
+            None
+        } else {
+            Some(String::from_utf8_lossy(&output.stderr).into_owned())
+        },
+        exit_code,
+        error: None,
+    }
+}
+
+/// Parse the stdout of `make -pRrq` and return deduplicated, sorted target names.
+fn parse_make_targets(output: &str) -> Vec<String> {
+    let mut targets: Vec<&str> = output
+        .lines()
+        .filter_map(|line| {
+            if line.starts_with(|c: char| c.is_whitespace() || c == '#') {
+                return None;
+            }
+            let colon = line.find(':')?;
+            // Skip variable assignments (`:=`, `::=`, `?=`)
+            if matches!(line[colon..].as_bytes().get(1).copied(), Some(b'=')) {
+                return None;
+            }
+            let name = line[..colon].trim();
+            if name.is_empty() || name.starts_with('.') || name.contains('%') {
+                return None;
+            }
+            Some(name)
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets.iter().map(|s| s.to_string()).collect()
+}
+
 pub fn grep_cmd(pattern: &str, path: Option<&str>, recursive: bool) -> Vec<String> {
     let mut args = vec!["rg".into(), "--color=never".into()];
     // rg is recursive by default; non-recursive means max-depth 1
@@ -66,7 +140,7 @@ pub fn grep_cmd(pattern: &str, path: Option<&str>, recursive: bool) -> Vec<Strin
 pub fn list_ops() -> String {
     "build, clean, check, disassemble, hex_dump, grep, git_status, git_diff, \
      read_instruction, write_instruction, read_bytes, write_bytes, \
-     generate_patch, apply_patch, list_ops"
+     generate_patch, apply_patch, list_targets, list_ops"
         .into()
 }
 
@@ -547,5 +621,71 @@ mod tests {
     fn parse_objdump_empty_returns_none() {
         assert_eq!(parse_objdump_byte_count(""), None);
         assert_eq!(parse_objdump_byte_count("no instructions here"), None);
+    }
+
+    // ── parse_make_targets ────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_make_targets_basic() {
+        let output = "all: foo bar\nfoo: src/main.c\nbar:\n";
+        let targets = parse_make_targets(output);
+        assert!(targets.contains(&"all".to_string()));
+        assert!(targets.contains(&"foo".to_string()));
+        assert!(targets.contains(&"bar".to_string()));
+        assert_eq!(targets.len(), 3);
+    }
+
+    #[test]
+    fn parse_make_targets_filters_dot_targets() {
+        let output = ".PHONY: all\n.DEFAULT_GOAL := all\nall:\n";
+        let targets = parse_make_targets(output);
+        assert!(!targets.contains(&".PHONY".to_string()));
+        assert!(!targets.contains(&".DEFAULT_GOAL".to_string()));
+        assert!(targets.contains(&"all".to_string()));
+    }
+
+    #[test]
+    fn parse_make_targets_filters_pattern_rules() {
+        let output = "%.o: %.c\nall:\n";
+        let targets = parse_make_targets(output);
+        assert!(!targets.iter().any(|t| t.contains('%')));
+        assert!(targets.contains(&"all".to_string()));
+    }
+
+    #[test]
+    fn parse_make_targets_filters_variable_assignments() {
+        let output = "CC := gcc\nLD = ld\nall:\n";
+        let targets = parse_make_targets(output);
+        assert!(!targets.contains(&"CC".to_string()));
+        assert!(!targets.contains(&"LD".to_string()));
+        assert!(targets.contains(&"all".to_string()));
+    }
+
+    #[test]
+    fn parse_make_targets_skips_comment_lines() {
+        let output = "# this is a comment\nall:\n# another comment\n";
+        let targets = parse_make_targets(output);
+        assert_eq!(targets, vec!["all".to_string()]);
+    }
+
+    #[test]
+    fn parse_make_targets_deduplicates() {
+        let output = "all: foo\nall: bar\n";
+        let targets = parse_make_targets(output);
+        assert_eq!(targets.iter().filter(|t| *t == "all").count(), 1);
+    }
+
+    #[test]
+    fn parse_make_targets_sorted() {
+        let output = "zzz:\naaa:\nmmm:\n";
+        let targets = parse_make_targets(output);
+        let mut sorted = targets.clone();
+        sorted.sort();
+        assert_eq!(targets, sorted);
+    }
+
+    #[test]
+    fn parse_make_targets_empty_input() {
+        assert!(parse_make_targets("").is_empty());
     }
 }

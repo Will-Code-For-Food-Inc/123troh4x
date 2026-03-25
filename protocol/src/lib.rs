@@ -74,6 +74,11 @@ pub enum Op {
     GitDiff {
         file: Option<String>,
     },
+    /// List available Make targets in the current (or given) Makefile.
+    ListTargets {
+        /// Path to the Makefile. Defaults to "Makefile" in the workdir.
+        file: Option<String>,
+    },
     /// Query what ops this agent supports.
     ListOps,
 

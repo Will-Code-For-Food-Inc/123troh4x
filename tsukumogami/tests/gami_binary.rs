@@ -76,7 +76,7 @@ fn list_ops_ok() {
     assert_eq!(resp.exit_code, 0);
     let stdout = resp.stdout.unwrap();
     for op in &["build", "clean", "check", "disassemble", "hex_dump",
-                "grep", "git_status", "git_diff", "list_ops"] {
+                "grep", "git_status", "git_diff", "list_targets", "list_ops"] {
         assert!(stdout.contains(op), "missing op: {op}");
     }
 }

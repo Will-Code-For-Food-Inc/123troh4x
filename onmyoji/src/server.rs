@@ -144,6 +144,17 @@ struct CopyFromSessionParams {
     host_path: String,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ListBuildTargetsParams {
+    /// Session ID returned by start_session.
+    session_id: String,
+    /// Working directory inside the container where the Makefile lives.
+    /// E.g. "/dshax/vendor/pokeplatinum"
+    workdir: Option<String>,
+    /// Path to the Makefile, relative to workdir. Defaults to "Makefile".
+    file: Option<String>,
+}
+
 fn parse_addr(s: &str) -> Result<u32, String> {
     let s = s.trim();
     if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
@@ -483,6 +494,42 @@ impl OnmyojiServer {
         match podman::copy_from_container(&session.container_id, &container_path, &host_path) {
             Ok(()) => format!("copied {container_path} → {host_path}"),
             Err(e) => format!("error: {e}"),
+        }
+    }
+
+    /// List available Make targets in an active container session.
+    /// Runs `make -pRrq` inside the container and returns a sorted, deduplicated
+    /// list of non-special, non-pattern targets (one per line).
+    #[tool(description = "List Make targets available in a container session's workdir. Returns one target name per line, sorted. Use before calling run_op with Build to know what targets exist.")]
+    fn list_build_targets(
+        &self,
+        Parameters(ListBuildTargetsParams { session_id, workdir, file }): Parameters<ListBuildTargetsParams>,
+    ) -> String {
+        let session = match self.sessions.get(&session_id) {
+            None => return format!("error: unknown session {session_id}"),
+            Some(s) => s,
+        };
+        let op = Op::ListTargets { file };
+        let request = Request {
+            id: uuid::Uuid::new_v4().to_string(),
+            workdir,
+            op,
+        };
+        match podman::exec_op(&session.container_id, &request) {
+            Err(e) => format!("error: {e}"),
+            Ok(Response { ok, stdout, stderr, exit_code, error, .. }) => {
+                if ok || exit_code == 2 {
+                    // exit 2 is normal for `make -pRrq` (targets out of date)
+                    stdout.unwrap_or_else(|| "(no targets found)".to_owned())
+                } else {
+                    let mut parts = Vec::new();
+                    if let Some(o) = stdout { parts.push(o); }
+                    if let Some(e) = stderr { parts.push(format!("[stderr] {e}")); }
+                    if let Some(e) = error { parts.push(format!("[error] {e}")); }
+                    parts.push(format!("[exit {exit_code}]"));
+                    parts.join("\n")
+                }
+            }
         }
     }
 

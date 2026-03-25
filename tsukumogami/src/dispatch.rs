@@ -29,6 +29,9 @@ pub fn dispatch(req: Request) -> Response {
             }
             ops::run_op(&id, args, workdir)
         }
+        Op::ListTargets { file } => {
+            ops::list_targets(&id, file.as_deref().unwrap_or("Makefile"), workdir)
+        }
         Op::ListOps => Response {
             id,
             ok: true,
@@ -88,7 +91,7 @@ mod tests {
         assert_eq!(resp.exit_code, 0);
         let stdout = resp.stdout.unwrap();
         for op in &["build", "clean", "check", "disassemble", "hex_dump",
-                    "grep", "git_status", "git_diff", "list_ops"] {
+                    "grep", "git_status", "git_diff", "list_targets", "list_ops"] {
             assert!(stdout.contains(op), "missing: {op}");
         }
     }

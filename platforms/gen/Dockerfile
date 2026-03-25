@@ -1,6 +1,6 @@
 FROM romhack-base
 
-RUN apt install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     binutils-m68k-linux-gnu \
     default-jre-headless \
     gcc-m68k-linux-gnu \

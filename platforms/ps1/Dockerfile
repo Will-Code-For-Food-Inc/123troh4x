@@ -3,7 +3,7 @@ FROM romhack-base
 # gcc-mipsel-linux-gnu is the correct toolchain for PS1 decomp work.
 # The PS1 (MIPS R3000A) runs in little-endian mode; use -nostdlib and
 # -ffreestanding in your project to target bare-metal.
-RUN apt install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     binutils-mipsel-linux-gnu \
     gcc-mipsel-linux-gnu
 

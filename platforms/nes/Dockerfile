@@ -1,6 +1,6 @@
 FROM romhack-base
 
-RUN apt install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     binutils \
     cc65
 

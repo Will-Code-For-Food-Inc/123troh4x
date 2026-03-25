@@ -115,6 +115,30 @@ build-gami:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Qdrant vector store
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#   make run-qdrant    — start Qdrant in the background (data in ./qdrant_storage)
+#   make stop-qdrant   — stop and remove the container
+#
+# REST API:  http://localhost:6333
+# gRPC:      localhost:6334  (used by the Rust qdrant-client)
+# Dashboard: http://localhost:6333/dashboard
+
+QDRANT_STORAGE ?= $(CURDIR)/qdrant_storage
+
+run-qdrant:
+	$(CONTAINER_CMD) run -d --name qdrant --rm \
+		-p 6333:6333 \
+		-p 6334:6334 \
+		-v $(QDRANT_STORAGE):/qdrant/storage \
+		docker.io/qdrant/qdrant:latest
+
+stop-qdrant:
+	$(CONTAINER_CMD) stop qdrant
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Testing
 # ─────────────────────────────────────────────────────────────────────────────
 #

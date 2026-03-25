@@ -105,6 +105,23 @@ pub fn exec_op(container_id: &str, request: &Request) -> Result<Response, String
         .map_err(|e| format!("gami response parse error: {e}\nraw: {stdout}"))
 }
 
+/// Run `arm-none-eabi-nm --print-size --numeric-sort` on an ELF inside a
+/// running container and return the raw stdout.
+///
+/// Parse the result with `knowledge::parse_nm_output`.
+pub fn nm_symbols(container_id: &str, elf: &str) -> Result<String, String> {
+    let out = Command::new("podman")
+        .args(["exec", container_id,
+               "arm-none-eabi-nm", "--print-size", "--numeric-sort", elf])
+        .output()
+        .map_err(|e| format!("podman exec nm failed: {e}"))?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_owned())
+    }
+}
+
 /// Build a platform image (and romhack-base first if needed).
 pub fn build_platform(root: &str, platform: &PlatformInfo) -> Result<String, String> {
     if !image_exists("romhack-base") {

@@ -12,7 +12,8 @@ name = "onmyoji"
 path = "src/main.rs"
 
 [dependencies]
-protocol = { path = "../protocol" }
+protocol  = { path = "../protocol" }
+knowledge = { path = "../knowledge" }
 rmcp = { version = "1.2.0", features = ["server", "macros", "transport-io", "schemars"] }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }

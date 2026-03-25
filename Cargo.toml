@@ -1,5 +1,5 @@
 [workspace]
-members = ["protocol", "tsukumogami", "onmyoji"]
+members = ["protocol", "tsukumogami", "onmyoji", "knowledge"]
 resolver = "2"
 
 [profile.release]

@@ -14,9 +14,7 @@ RUN cargo build --release -p tsukumogami
 
 FROM ubuntu:latest
 
-RUN apt update && apt upgrade -y
-
-RUN apt install -y \
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --fix-missing \
     binutils-arm-none-eabi \
     bison \
     cmake \
@@ -36,12 +34,13 @@ RUN apt install -y \
     wget \
     xxd \
     xz-utils \
-    zsh
+    zsh \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Build flips (IPS/BPS patcher) from source — not in apt
 RUN git clone --depth 1 https://github.com/Alcaro/Flips.git /tmp/flips \
     && cd /tmp/flips \
-    && make flips \
+    && TARGET=cli make flips \
     && install -m 755 flips /usr/local/bin/flips \
     && rm -rf /tmp/flips
 

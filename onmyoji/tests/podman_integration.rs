@@ -262,6 +262,38 @@ fn run_op_generate_patch_identical_files() {
     });
 }
 
+#[test]
+fn run_op_apply_patch_roundtrip() {
+    if skip_unless_integration() { return; }
+    with_session(|ctr| {
+        // Generate an identity patch (orig == modified), apply it, verify the
+        // output is a valid copy by checking the ELF magic header.
+        let patch = "/tmp/test_apply_identity.ips";
+        let output = "/tmp/test_apply_out.bin";
+
+        let gen = send(ctr, Op::GeneratePatch {
+            original: "/usr/local/bin/gami".into(),
+            modified: "/usr/local/bin/gami".into(),
+            output: patch.into(),
+            format: PatchFormat::Ips,
+        });
+        assert!(gen.ok, "generate_patch failed: {:?}", gen.error.or(gen.stderr));
+
+        let apply = send(ctr, Op::ApplyPatch {
+            rom: "/usr/local/bin/gami".into(),
+            patch: patch.into(),
+            output: output.into(),
+            format: PatchFormat::Ips,
+        });
+        assert!(apply.ok, "apply_patch failed: {:?}", apply.error.or(apply.stderr));
+
+        // Output should be a copy of gami — verify ELF magic
+        let read = send(ctr, Op::ReadBytes { file: output.into(), offset: 0, length: 4 });
+        assert!(read.ok, "read_bytes on patched output failed: {:?}", read.error);
+        assert_eq!(read.stdout.unwrap().trim(), "7f454c46", "output should be ELF");
+    });
+}
+
 // ── Debug port ────────────────────────────────────────────────────────────────
 
 #[test]

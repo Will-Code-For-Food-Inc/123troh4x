@@ -3,7 +3,7 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-use protocol::{Arch, Op, Request, Response, SizeMismatchError};
+use protocol::{Arch, Op, Request, Response};
 
 /// Path to the gami binary under test.
 fn gami_bin() -> std::path::PathBuf {

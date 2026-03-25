@@ -257,11 +257,13 @@ pub fn write_instruction(
 /// Returns the number of bytes in the hex column (space-separated pairs).
 fn parse_objdump_byte_count(output: &str) -> Option<u32> {
     for line in output.lines() {
-        // Skip header lines (no tab after address)
+        // objdump format: "   addr:\thex bytes\tmnemonic"
+        // split_once(':') gives after_addr.1 = "\thex bytes\tmnemonic"
         let Some(after_addr) = line.split_once(':') else { continue };
+        // cols[0] is empty (before first tab), cols[1] is hex bytes, cols[2] is mnemonic
         let cols: Vec<&str> = after_addr.1.splitn(3, '\t').collect();
-        if cols.len() < 2 { continue; }
-        let hex_col = cols[0].trim();
+        if cols.len() < 3 { continue; }
+        let hex_col = cols[1].trim();
         if hex_col.is_empty() { continue; }
         let count = hex_col.split_whitespace().count() as u32;
         if count > 0 { return Some(count); }
@@ -445,5 +447,105 @@ mod tests {
         let args = grep_cmd("TODO", None, false);
         assert!(args.contains(&"--max-depth=1".to_string()));
         assert!(args.contains(&"TODO".to_string()));
+    }
+
+    // ── read_instruction_cmd ──────────────────────────────────────────────────
+
+    #[test]
+    fn read_instruction_thumb_argv() {
+        let args = read_instruction_cmd("rom.gba", 0x800_0100, &Arch::Thumb).unwrap();
+        assert_eq!(args[0], "arm-none-eabi-objdump");
+        assert!(args.contains(&"-b".to_string()));
+        assert!(args.contains(&"binary".to_string()));
+        assert!(args.contains(&"-m".to_string()));
+        assert!(args.contains(&"arm".to_string()));
+        assert!(args.iter().any(|a| a.contains("force-thumb")));
+        assert!(args.contains(&"-D".to_string()));
+        assert!(args.iter().any(|a| a.contains("start-address")));
+        assert!(args.iter().any(|a| a.contains("stop-address")));
+        assert_eq!(args.last().unwrap(), "rom.gba");
+    }
+
+    #[test]
+    fn read_instruction_unsupported_returns_err() {
+        let result = read_instruction_cmd("rom.bin", 0, &Arch::Mips32);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not yet implemented"));
+    }
+
+    // ── assemble_thumb_cmds ───────────────────────────────────────────────────
+
+    #[test]
+    fn assemble_thumb_as_argv() {
+        let (as_args, _) = assemble_thumb_cmds("/tmp/out.o", "/tmp/out.bin");
+        assert_eq!(as_args[0], "arm-none-eabi-as");
+        assert!(as_args.contains(&"-mthumb".to_string()));
+        assert!(as_args.contains(&"-o".to_string()));
+        assert!(as_args.contains(&"/tmp/out.o".to_string()));
+        assert_eq!(as_args.last().unwrap(), "-"); // stdin
+    }
+
+    #[test]
+    fn assemble_thumb_objcopy_argv() {
+        let (_, objcopy_args) = assemble_thumb_cmds("/tmp/out.o", "/tmp/out.bin");
+        assert_eq!(objcopy_args[0], "arm-none-eabi-objcopy");
+        assert!(objcopy_args.contains(&"-O".to_string()));
+        assert!(objcopy_args.contains(&"binary".to_string()));
+        assert!(objcopy_args.iter().any(|a| a.contains("text")));
+        assert!(objcopy_args.contains(&"/tmp/out.o".to_string()));
+        assert_eq!(objcopy_args.last().unwrap(), "/tmp/out.bin");
+    }
+
+    // ── generate_patch_ips_cmd / apply_patch_ips_cmd ─────────────────────────
+
+    #[test]
+    fn generate_patch_ips_argv() {
+        let args = generate_patch_ips_cmd("orig.gba", "mod.gba", "patch.ips");
+        assert_eq!(args[0], "flips");
+        assert!(args.contains(&"--create".to_string()));
+        assert!(args.contains(&"--ips".to_string()));
+        assert!(args.contains(&"orig.gba".to_string()));
+        assert!(args.contains(&"mod.gba".to_string()));
+        assert_eq!(args.last().unwrap(), "patch.ips");
+    }
+
+    #[test]
+    fn apply_patch_ips_argv() {
+        let args = apply_patch_ips_cmd("orig.gba", "patch.ips", "out.gba");
+        assert_eq!(args[0], "flips");
+        assert!(args.contains(&"--apply".to_string()));
+        assert!(args.contains(&"--ips".to_string()));
+        assert!(args.contains(&"patch.ips".to_string()));
+        assert!(args.contains(&"orig.gba".to_string()));
+        assert_eq!(args.last().unwrap(), "out.gba");
+    }
+
+    // ── parse_objdump_byte_count ──────────────────────────────────────────────
+
+    #[test]
+    fn parse_objdump_two_byte_thumb() {
+        let output = "   8000100:\t01 d0       \tbne.n\t0x8000104\n";
+        assert_eq!(parse_objdump_byte_count(output), Some(2));
+    }
+
+    #[test]
+    fn parse_objdump_four_byte_thumb2() {
+        let output = "   8000100:\tf0 b5 03 af \tpush\t{r4, r5, r6, r7, lr}\n";
+        assert_eq!(parse_objdump_byte_count(output), Some(4));
+    }
+
+    #[test]
+    fn parse_objdump_skips_header_lines() {
+        let output = "\nrom.bin:     file format binary\n\n\
+                      Disassembly of section .data:\n\n\
+                      00000000 <.data>:\n\
+                      \t0:\te0 12 ff ff \tldr\tr1, [r0, r2]\n";
+        assert_eq!(parse_objdump_byte_count(output), Some(4));
+    }
+
+    #[test]
+    fn parse_objdump_empty_returns_none() {
+        assert_eq!(parse_objdump_byte_count(""), None);
+        assert_eq!(parse_objdump_byte_count("no instructions here"), None);
     }
 }

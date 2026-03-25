@@ -7,12 +7,13 @@ CONTAINER_CMD := $(shell command -v podman 2>/dev/null || command -v docker 2>/d
 # ─────────────────────────────────────────────────────────────────────────────
 # Build the shared base image first, then any platform image on top of it.
 #
-#   make build-base        — build shared/Dockerfile.base → romhack-base
-#   make build-<platform>  — build a single platform image
-#   make build-all         — build base, then all platform images
+#   make build-base        — build shared/Dockerfile.base → romhack-base:latest
+#   make build-<platform>  — build a single platform image from existing base
+#   make build-all         — build base, then all platform images in sequence
 #
-# Platform builds depend on build-base, so make handles the order automatically.
-# Run `make -j build-all` to build all platform images in parallel after the base.
+# Platform builds use whatever romhack-base:latest is currently tagged.
+# Run `make build-base` explicitly first whenever gami source or the base
+# Dockerfile changes, then rebuild the affected platform images.
 
 .PHONY: build-all build-base \
         $(addprefix build-,$(PLATFORMS)) \
@@ -23,9 +24,7 @@ CONTAINER_CMD := $(shell command -v podman 2>/dev/null || command -v docker 2>/d
         build-onmyoji build-gami \
         test test-integration coverage coverage-integration bench
 
-$(addprefix build-,$(PLATFORMS)): build-base
-
-build-all: $(addprefix build-,$(PLATFORMS))
+build-all: build-base $(addprefix build-,$(PLATFORMS))
 
 build-base:
 	$(CONTAINER_CMD) build -t romhack-base -f ./shared/Dockerfile.base .

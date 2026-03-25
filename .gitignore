@@ -44,3 +44,4 @@ shared/gami
 
 # Machine-specific onmyoji config (path to repo root varies per machine)
 onmyoji.toml
+coverage/

@@ -3,7 +3,7 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-use protocol::{Op, Request, Response};
+use protocol::{Arch, Op, Request, Response, SizeMismatchError};
 
 /// Path to the gami binary under test.
 fn gami_bin() -> std::path::PathBuf {
@@ -203,4 +203,73 @@ fn two_sequential_requests_correct_ids() {
     assert_eq!(resps.len(), 2);
     assert_eq!(resps[0].id, "req-0");
     assert_eq!(resps[1].id, "req-1");
+}
+
+// ── ReadBytes / WriteBytes ────────────────────────────────────────────────────
+
+#[test]
+fn read_bytes_elf_magic() {
+    // gami is an ELF binary — first 4 bytes are always 7f 45 4c 46
+    let file = gami_bin().to_string_lossy().into_owned();
+    let resp = send_one(Op::ReadBytes { file, offset: 0, length: 4 }, None);
+    assert!(resp.ok);
+    assert_eq!(resp.stdout.unwrap().trim(), "7f454c46");
+}
+
+#[test]
+fn write_bytes_roundtrip() {
+    // Write known bytes to a temp file at a known offset, read them back.
+    let path = "/tmp/gami_test_write_bytes.bin";
+    std::fs::write(path, vec![0u8; 16]).unwrap();
+
+    let write_resp = send_one(
+        Op::WriteBytes { file: path.into(), offset: 4, bytes: "deadbeef".into() },
+        None,
+    );
+    assert!(write_resp.ok, "write failed: {:?}", write_resp.error);
+
+    let read_resp = send_one(Op::ReadBytes { file: path.into(), offset: 4, length: 4 }, None);
+    assert!(read_resp.ok);
+    assert_eq!(read_resp.stdout.unwrap().trim(), "deadbeef");
+
+    std::fs::remove_file(path).ok();
+}
+
+#[test]
+fn write_bytes_invalid_hex_returns_error() {
+    let path = "/tmp/gami_test_invalid_hex.bin";
+    std::fs::write(path, vec![0u8; 16]).unwrap();
+    let resp = send_one(
+        Op::WriteBytes { file: path.into(), offset: 0, bytes: "ZZZZ".into() },
+        None,
+    );
+    assert!(!resp.ok);
+    assert!(resp.error.as_deref().unwrap_or("").contains("invalid hex"));
+    std::fs::remove_file(path).ok();
+}
+
+// ── ReadInstruction ───────────────────────────────────────────────────────────
+
+#[test]
+fn read_instruction_unsupported_arch_returns_error() {
+    let file = gami_bin().to_string_lossy().into_owned();
+    let resp = send_one(Op::ReadInstruction { file, offset: 0, arch: Arch::Mips32 }, None);
+    assert!(!resp.ok);
+    assert!(resp.error.as_deref().unwrap_or("").contains("not yet implemented"));
+}
+
+// Note: write_instruction_size_mismatch test lives in podman_integration.rs
+// because it requires arm-none-eabi-objdump and arm-none-eabi-as, which are
+// only available inside the container image.
+
+// ── list_ops includes new ops ─────────────────────────────────────────────────
+
+#[test]
+fn list_ops_includes_binary_ops() {
+    let resp = send_one(Op::ListOps, None);
+    let stdout = resp.stdout.unwrap();
+    for op in &["read_instruction", "write_instruction", "read_bytes", "write_bytes",
+                "generate_patch", "apply_patch"] {
+        assert!(stdout.contains(op), "missing op: {op}");
+    }
 }

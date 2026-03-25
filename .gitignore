@@ -51,3 +51,9 @@ qdrant_storage/
 
 # Knowledge database (populated at runtime from decomp builds)
 knowledge/knowledge.db
+
+# Local dev container — closed source, personal auth mounts
+Containerfile.remote
+Containerfile.mcp
+entrypoint.sh
+dev-run.sh

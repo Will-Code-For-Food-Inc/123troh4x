@@ -5,6 +5,8 @@ use dashmap::DashMap;
 #[derive(Debug, Clone)]
 pub struct Session {
     pub container_id: String,
+    /// Stored for session listing and logging. Used by list_sessions (planned).
+    #[allow(dead_code)]
     pub platform: String,
 }
 

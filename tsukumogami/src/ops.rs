@@ -50,8 +50,9 @@ pub fn hexdump_cmd(file: &str, offset: Option<u32>, length: Option<u32>) -> Vec<
 
 pub fn grep_cmd(pattern: &str, path: Option<&str>, recursive: bool) -> Vec<String> {
     let mut args = vec!["rg".into(), "--color=never".into()];
-    if recursive {
-        args.push("-r".into());
+    // rg is recursive by default; non-recursive means max-depth 1
+    if !recursive {
+        args.push("--max-depth=1".into());
     }
     args.push(pattern.into());
     if let Some(p) = path {
@@ -193,13 +194,13 @@ mod tests {
     #[test]
     fn grep_minimal() {
         let args = grep_cmd("main", None, true);
-        assert_eq!(args, vec!["rg", "--color=never", "-r", "main"]);
+        assert_eq!(args, vec!["rg", "--color=never", "main"]);
     }
 
     #[test]
     fn grep_with_path() {
         let args = grep_cmd("TODO", Some("src/"), true);
-        assert_eq!(args, vec!["rg", "--color=never", "-r", "TODO", "src/"]);
+        assert_eq!(args, vec!["rg", "--color=never", "TODO", "src/"]);
     }
 
     #[test]
